@@ -1,0 +1,60 @@
+# Target sales order process (web orders, automated checks)
+version: 1
+swimlanes:
+  customer:
+    name: Customer
+  sales:
+    name: Sales
+  manager:
+    name: Sales Manager
+  system:
+    name: ERP
+processes:
+  place-order:
+    name: Place web order
+    lane: customer
+    type: start
+    systems: [Web shop]
+  receive-order:
+    name: Receive order
+    lane: system
+    description: Web orders are imported automatically.
+    systems: [ERP]
+  check-credit:
+    name: Check credit
+    lane: system
+    systems: [ERP, Credit service]
+  check-amount:
+    name: Check amount
+    lane: system
+    type: decision
+  approve-order:
+    name: Approve order
+    lane: manager
+    systems: [ERP]
+  register-order:
+    name: Register order
+    lane: system
+    systems: [ERP]
+  confirm-order:
+    name: Send confirmation
+    lane: system
+    type: end
+    systems: [ERP]
+flows:
+  - from: place-order
+    to: receive-order
+  - from: receive-order
+    to: check-credit
+  - from: check-credit
+    to: check-amount
+  - from: check-amount
+    to: approve-order
+    label: Over limit
+  - from: check-amount
+    to: register-order
+    label: Within limit
+  - from: approve-order
+    to: register-order
+  - from: register-order
+    to: confirm-order

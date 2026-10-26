@@ -1,0 +1,44 @@
+version: 1
+swimlanes:
+  requester:
+    name: Requester
+  purchasing:
+    name: Purchasing
+  supplier:
+    name: Supplier
+  warehouse:
+    name: Warehouse
+processes:
+  request-purchase:
+    name: Request purchase
+    lane: requester
+    type: start
+    documents: [Purchase request]
+  compare-quotes:
+    name: Compare quotes
+    lane: purchasing
+  issue-po:
+    name: Issue purchase order
+    lane: purchasing
+    documents: [Purchase order]
+  ship-goods:
+    name: Ship goods
+    lane: supplier
+  receive-goods:
+    name: Receive goods
+    lane: warehouse
+  pay-invoice:
+    name: Pay invoice
+    lane: purchasing
+    type: end
+flows:
+  - from: request-purchase
+    to: compare-quotes
+  - from: compare-quotes
+    to: issue-po
+  - from: issue-po
+    to: ship-goods
+  - from: ship-goods
+    to: receive-goods
+  - from: receive-goods
+    to: pay-invoice

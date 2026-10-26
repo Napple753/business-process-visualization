@@ -1,0 +1,33 @@
+version: 1
+swimlanes:
+  warehouse:
+    name: Warehouse
+  carrier:
+    name: Carrier
+processes:
+  pick-items:
+    name: Pick items
+    lane: warehouse
+    type: start
+  print-label:
+    name: Print label
+    lane: warehouse
+  pack-items:
+    name: Pack items
+    lane: warehouse
+  hand-over:
+    name: Hand over to carrier
+    lane: carrier
+  deliver:
+    name: Deliver
+    lane: carrier
+    type: end
+flows:
+  - from: pick-items
+    to: print-label
+  - from: print-label
+    to: pack-items
+  - from: pack-items
+    to: hand-over
+  - from: hand-over
+    to: deliver

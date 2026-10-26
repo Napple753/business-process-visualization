@@ -1,0 +1,60 @@
+# Current sales order process (paper based)
+version: 1
+swimlanes:
+  customer:
+    name: Customer
+  sales:
+    name: Sales
+  manager:
+    name: Sales Manager
+  system:
+    name: ERP
+processes:
+  place-order:
+    name: Place order
+    lane: customer
+    type: start
+    documents: [Order form]
+  receive-order:
+    name: Receive order
+    lane: sales
+    description: Order arrives by fax or email.
+    documents: [Order form]
+  enter-order:
+    name: Enter order
+    lane: sales
+    description: Sales types the order into the ERP by hand.
+    systems: [ERP]
+  check-amount:
+    name: Check amount
+    lane: sales
+    type: decision
+  approve-order:
+    name: Approve order
+    lane: manager
+  register-order:
+    name: Register order
+    lane: system
+    systems: [ERP]
+  confirm-order:
+    name: Send confirmation
+    lane: sales
+    type: end
+    documents: [Order confirmation]
+flows:
+  - from: place-order
+    to: receive-order
+  - from: receive-order
+    to: enter-order
+  - from: enter-order
+    to: check-amount
+  - from: check-amount
+    to: approve-order
+    label: Over limit
+  - from: check-amount
+    to: register-order
+    label: Within limit
+  - from: approve-order
+    to: register-order
+  - from: register-order
+    to: confirm-order
