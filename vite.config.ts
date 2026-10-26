@@ -19,6 +19,8 @@ export default defineConfig({
     target: "es2022",
     minify: !process.env.TAURI_ENV_DEBUG ? "oxc" : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+    // The bundle is loaded from disk by the desktop app; ELK alone is about 1.5 MB.
+    chunkSizeWarningLimit: 2500,
   },
   test: {
     include: ["src/**/*.test.ts"],
