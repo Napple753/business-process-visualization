@@ -1,0 +1,24 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Main window permissions",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "store:default",
+    "fs:default",
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file",
+    "fs:allow-read-dir",
+    "fs:allow-mkdir",
+    "fs:allow-exists",
+    "fs:allow-stat",
+    "fs:allow-watch",
+    "fs:allow-unwatch",
+    {
+      "identifier": "fs:scope",
+      "allow": [{ "path": "**" }]
+    }
+  ]
+}
