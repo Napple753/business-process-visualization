@@ -17,6 +17,7 @@ export interface FileSystem {
   mkdir(path: string): Promise<void>;
   /** Calls `onChange` with changed paths; returns a function that stops watching. */
   watch(path: string, onChange: (paths: string[]) => void): Promise<() => void>;
+  confirm(message: string): Promise<boolean>;
   loadSetting(key: string): Promise<string | null>;
   saveSetting(key: string, value: string | null): Promise<void>;
 }

@@ -51,6 +51,9 @@ export function createDemoFs(): FileSystem {
     async watch() {
       return () => {};
     },
+    async confirm(message) {
+      return window.confirm(message);
+    },
     async loadSetting(key) {
       try {
         return localStorage.getItem(`pw:${key}`);

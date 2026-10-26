@@ -1,4 +1,4 @@
-import { open } from "@tauri-apps/plugin-dialog";
+import { ask, open } from "@tauri-apps/plugin-dialog";
 import { exists, mkdir, readDir, readTextFile, watch, writeTextFile } from "@tauri-apps/plugin-fs";
 import { load } from "@tauri-apps/plugin-store";
 import type { FileSystem } from "./fs";
@@ -22,6 +22,7 @@ export function createTauriFs(): FileSystem {
     async watch(path, onChange) {
       return watch(path, (event) => onChange(event.paths), { recursive: true, delayMs: 300 });
     },
+    confirm: (message) => ask(message, { title: "Process Workbench", kind: "warning" }),
     async loadSetting(key) {
       const value = await (await store).get<string>(key);
       return value ?? null;

@@ -39,6 +39,19 @@ export type Selection =
 /** A two-step edit waiting for the user to pick a target process. */
 export type Pending = { kind: "merge"; side: Side; from: string } | null;
 
+/** Where a process created through the add dialog goes. */
+export type AddPlacement =
+  | { kind: "between"; from: string; to: string }
+  | { kind: "after"; from: string }
+  | { kind: "before"; to: string }
+  | { kind: "first" };
+
+export interface AddRequest {
+  side: Side;
+  placement: AddPlacement;
+  lane?: string;
+}
+
 export interface Notice {
   level: "info" | "warning" | "error";
   text: string;
@@ -54,6 +67,7 @@ interface AppState {
   view: ViewMode;
   selection: Selection;
   pending: Pending;
+  addRequest: AddRequest | null;
   notice: Notice | null;
   activeSide: Side;
 
@@ -68,6 +82,7 @@ interface AppState {
   setView(view: ViewMode): void;
   select(selection: Selection): void;
   setPending(pending: Pending): void;
+  requestAdd(request: AddRequest | null): void;
   notify(notice: Notice | null): void;
   apply(side: Side, edit: (model: FlowModel) => FlowModel | MutationResult): void;
   undo(side?: Side): void;
@@ -88,6 +103,7 @@ export const useStore = create<AppState>((set, get) => ({
   view: "compare",
   selection: null,
   pending: null,
+  addRequest: null,
   notice: null,
   activeSide: "tobe",
 
@@ -168,6 +184,10 @@ export const useStore = create<AppState>((set, get) => ({
 
   setPending(pending) {
     set({ pending });
+  },
+
+  requestAdd(addRequest) {
+    set({ addRequest, pending: null });
   },
 
   notify(notice) {
