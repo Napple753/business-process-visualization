@@ -99,7 +99,8 @@ export function ProcessScreen() {
             const state = current.sides[side];
             const other = current.sides[side === "asis" ? "tobe" : "asis"];
             return (
-              <section key={side} className="pane" aria-label={SIDE_NAMES[side]}>
+              // Keyed by view so that each canvas fits its content again after switching.
+              <section key={`${view}-${side}`} className="pane" aria-label={SIDE_NAMES[side]}>
                 <PaneHeader side={side} state={state} />
                 <div className="pane-body">
                   <PaneBody

@@ -50,7 +50,7 @@ export function ProcessNode({ data, selected }: NodeProps<ProcessNodeType>) {
       {meta && <span className="meta">{meta}</span>}
       <Handle type="source" position={Position.Bottom} isConnectable={false} />
       {data.editable && (
-        <NodeToolbar position={Position.Right} offset={8}>
+        <NodeToolbar position={Position.Top} offset={16}>
           <div className="node-toolbar" onMouseDown={(e) => e.stopPropagation()}>
             {!data.hasPredecessors && (
               <button className="small" onClick={data.onAddBefore} title="Add a process before this one">

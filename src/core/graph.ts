@@ -42,12 +42,3 @@ export function projectSuccessors(graph: Graph, keep: Set<string>): Map<string, 
   }
   return result;
 }
-
-export function invert(succ: Map<string, Set<string>>): Map<string, Set<string>> {
-  const pred = new Map<string, Set<string>>();
-  for (const id of succ.keys()) pred.set(id, new Set());
-  for (const [from, tos] of succ) {
-    for (const to of tos) pred.get(to)?.add(from);
-  }
-  return pred;
-}

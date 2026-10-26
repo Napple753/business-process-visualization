@@ -129,6 +129,23 @@ describe("diff", () => {
     expect(moved).toEqual(["b"]);
   });
 
+  it("does not report added or removed branches as moved", () => {
+    const asis = chain(["a", "b", "c", "d"]);
+    const tobe = structuredClone(asis);
+    tobe.processes.push({ id: "x", name: "x", lane: "l", type: "task" });
+    tobe.flows.push({ from: "b", to: "x" }, { from: "x", to: "d" });
+    const moved = (d: ReturnType<typeof diffModels>) =>
+      [...d.processes.values()].filter((p) => p.kinds.includes("moved"));
+    expect(moved(diffModels(asis, tobe))).toEqual([]);
+    expect(moved(diffModels(tobe, asis))).toEqual([]);
+  });
+
+  it("reports one process when two are swapped", () => {
+    const d = diffModels(chain(["a", "b", "c", "d"]), chain(["a", "c", "b", "d"]));
+    const moved = [...d.processes.values()].filter((p) => p.kinds.includes("moved"));
+    expect(moved).toHaveLength(1);
+  });
+
   it("detects rename, lane change and removal", () => {
     const asis = chain(["a", "b", "c"]);
     asis.lanes.push({ id: "m", name: "m" });

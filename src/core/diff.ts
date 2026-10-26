@@ -1,4 +1,4 @@
-import { buildGraph, invert, projectSuccessors } from "./graph";
+import { buildGraph, projectSuccessors } from "./graph";
 import { flowKey, type FlowModel, type Process } from "./model";
 
 export type ChangeKind = "added" | "removed" | "renamed" | "moved" | "laneChanged" | "modified";
@@ -69,10 +69,11 @@ export function diffModels(asis: FlowModel, tobe: FlowModel): ModelDiff {
  * A common process is "moved" when its position in the flow changed.
  *
  * Both graphs are projected onto the common processes, so plain insertions or
- * removals of other processes contract away. While the projections still differ,
- * the process with the most neighbour differences is taken as moved and dropped
- * from the projection. This yields a small set: swapping or relocating one process
- * reports that process only, not all of its old and new neighbours.
+ * removals of other processes contract away. A move both breaks old connections and
+ * creates new ones; only adding (or only removing) connections is a new or dropped
+ * branch/merge, not a move. While both kinds of change remain, the process involved
+ * in the most of them is taken as moved and dropped from the projection. Relocating
+ * or swapping a process therefore reports that process only, not its neighbours.
  */
 function movedIds(asis: FlowModel, tobe: FlowModel, common: Set<string>): Set<string> {
   const ga = buildGraph(asis);
@@ -80,30 +81,33 @@ function movedIds(asis: FlowModel, tobe: FlowModel, common: Set<string>): Set<st
   const keep = new Set(common);
   const moved = new Set<string>();
   for (;;) {
-    const sa = projectSuccessors(ga, keep);
-    const sb = projectSuccessors(gb, keep);
-    const pa = invert(sa);
-    const pb = invert(sb);
-    let worst: string | null = null;
+    const ea = edgeSet(projectSuccessors(ga, keep));
+    const eb = edgeSet(projectSuccessors(gb, keep));
+    const lost = [...ea].filter((e) => !eb.has(e));
+    const gained = [...eb].filter((e) => !ea.has(e));
+    if (lost.length === 0 || gained.length === 0) return moved;
+    const score = new Map<string, number>();
+    for (const edge of [...lost, ...gained]) {
+      for (const id of edge.split("->")) score.set(id, (score.get(id) ?? 0) + 1);
+    }
+    let worst = "";
     let worstScore = 0;
     for (const id of keep) {
-      const score =
-        symmetricDiff(sa.get(id), sb.get(id)).length + symmetricDiff(pa.get(id), pb.get(id)).length;
-      if (score > worstScore) {
+      const value = score.get(id) ?? 0;
+      if (value > worstScore) {
         worst = id;
-        worstScore = score;
+        worstScore = value;
       }
     }
-    if (worst === null) return moved;
     moved.add(worst);
     keep.delete(worst);
   }
 }
 
-function symmetricDiff(a: Set<string> | undefined, b: Set<string> | undefined): string[] {
-  const x = a ?? new Set<string>();
-  const y = b ?? new Set<string>();
-  return [...[...x].filter((v) => !y.has(v)), ...[...y].filter((v) => !x.has(v))];
+function edgeSet(succ: Map<string, Set<string>>): Set<string> {
+  const edges = new Set<string>();
+  for (const [from, tos] of succ) for (const to of tos) edges.add(`${from}->${to}`);
+  return edges;
 }
 
 function sameField(a: Process, b: Process, field: (typeof OTHER_FIELDS)[number]): boolean {

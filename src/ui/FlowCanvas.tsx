@@ -22,6 +22,7 @@ import { ProcessNode, type ProcessNodeType } from "./nodes/ProcessNode";
 const nodeTypes = { lane: LaneNode, process: ProcessNode };
 const edgeTypes = { flow: FlowEdge };
 const DROP_DISTANCE = 32;
+const FIT_OPTIONS = { padding: 0.06, maxZoom: 1 };
 
 export interface ViewportSync {
   instances: Map<Side, ReactFlowInstance>;
@@ -45,8 +46,16 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
   const { apply, select, setPending, requestAdd, notify } = useStore.getState();
   const [drag, setDrag] = useState<{ id: string; x: number; y: number } | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget>(null);
+
   const instanceRef = useRef<ReactFlowInstance | null>(null);
-  const fitted = useRef(false);
+  const fittedWidth = useRef(layout.width);
+
+  // Refit when columns are added or widened; growing taller keeps the user's viewport.
+  useEffect(() => {
+    if (layout.width === fittedWidth.current) return;
+    fittedWidth.current = layout.width;
+    requestAnimationFrame(() => void instanceRef.current?.fitView({ ...FIT_OPTIONS, duration: 200 }));
+  }, [layout.width]);
 
   const graph = useMemo(() => buildGraph(model), [model]);
   const laneIds = useMemo(() => new Set(model.lanes.map((l) => l.id)), [model]);
@@ -145,13 +154,6 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
         };
       });
   }, [model, diff, side, dropTarget, selection, requestAdd]);
-
-  useEffect(() => {
-    if (!fitted.current && instanceRef.current && layout.positions.size > 0) {
-      fitted.current = true;
-      requestAnimationFrame(() => void instanceRef.current?.fitView({ padding: 0.08, maxZoom: 1 }));
-    }
-  }, [layout]);
 
   const findDropTarget = (id: string, x: number, y: number): DropTarget => {
     const cx = x + NODE_WIDTH / 2;
@@ -254,6 +256,8 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
           instanceRef.current = instance as unknown as ReactFlowInstance;
           sync.instances.set(side, instance as unknown as ReactFlowInstance);
         }}
+        fitView
+        fitViewOptions={FIT_OPTIONS}
         onNodesChange={onNodesChange}
         onNodeDragStart={(_, node) => node.type === "process" && select({ side, kind: "process", id: node.id })}
         onNodeDragStop={onNodeDragStop}
