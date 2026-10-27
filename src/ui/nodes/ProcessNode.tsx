@@ -1,4 +1,5 @@
 import { Handle, NodeToolbar, Position, type Node, type NodeProps } from "@xyflow/react";
+import { useEffect, useRef, useState } from "react";
 import type { ChangeKind } from "../../core/diff";
 import type { Process } from "../../core/model";
 import { CHANGE_COLORS, CHANGE_LABELS, CHANGE_PRIORITY } from "../diffStyle";
@@ -13,6 +14,10 @@ export type ProcessNodeData = {
   onAddBefore: () => void;
   onMerge: () => void;
   onDelete: () => void;
+  /** True while the name is being edited in place (started by a double click). */
+  editing: boolean;
+  /** Ends in-place editing; null cancels. */
+  onRenameDone: (name: string | null) => void;
 };
 
 export type ProcessNodeType = Node<ProcessNodeData, "process">;
@@ -37,7 +42,11 @@ export function ProcessNode({ data, selected }: NodeProps<ProcessNodeType>) {
     >
       <Handle type="target" position={Position.Top} isConnectable={false} />
       <div className="shape" />
-      <span className="label">{process.name}</span>
+      {data.editing ? (
+        <NameEditor name={process.name} onDone={data.onRenameDone} />
+      ) : (
+        <span className="label">{process.name}</span>
+      )}
       {kinds.length > 0 && (
         <div className="chips">
           {CHANGE_PRIORITY.filter((k) => kinds.includes(k)).map((k) => (
@@ -83,5 +92,43 @@ export function ProcessNode({ data, selected }: NodeProps<ProcessNodeType>) {
         </NodeToolbar>
       )}
     </div>
+  );
+}
+
+/** In-shape name field: Enter or blur commits, Escape cancels, an empty name keeps the old one. */
+function NameEditor({ name, onDone }: { name: string; onDone: (name: string | null) => void }) {
+  const [draft, setDraft] = useState(name);
+  const input = useRef<HTMLInputElement>(null);
+  // React Flow briefly hides a re-rendered node while it measures it, and a hidden
+  // input cannot take focus, so retry for a few frames until focus lands.
+  useEffect(() => {
+    let frame = 0;
+    let attempts = 0;
+    const tryFocus = () => {
+      const el = input.current;
+      if (!el) return;
+      el.focus();
+      if (document.activeElement === el) el.select();
+      else if (++attempts < 30) frame = requestAnimationFrame(tryFocus);
+    };
+    frame = requestAnimationFrame(tryFocus);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  const finish = (commit: boolean) => onDone(commit && draft.trim() ? draft.trim() : null);
+  return (
+    <input
+      ref={input}
+      className="name-editor nodrag nopan"
+      aria-label="Process name"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => finish(true)}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") finish(true);
+        if (e.key === "Escape") finish(false);
+      }}
+      onDoubleClick={(e) => e.stopPropagation()}
+    />
   );
 }

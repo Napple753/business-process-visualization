@@ -21,6 +21,7 @@ standalone executable and is never added to the repositories it edits.
 | Action | How |
 | --- | --- |
 | Insert a process between two | Hover the connector, click **+** |
+| Rename a process | Double-click it and type; Enter or clicking elsewhere applies, Esc cancels |
 | Add next / branch / merge / delete | Select a process and use its toolbar |
 | Move a process | Drag it onto another connector |
 | Change swimlane | Drag it into another column, or use the properties panel |

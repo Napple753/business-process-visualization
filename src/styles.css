@@ -632,6 +632,21 @@ label.field > span {
   -webkit-box-orient: vertical;
 }
 
+.process-node .name-editor {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  padding: 2px 4px;
+  text-align: center;
+  font-size: 13px;
+  border-color: var(--accent);
+}
+
+.process-node.decision .name-editor {
+  width: 120px;
+  font-size: 12px;
+}
+
 .process-node.decision .label {
   max-width: 110px;
   font-size: 12px;

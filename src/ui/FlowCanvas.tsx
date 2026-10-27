@@ -51,6 +51,7 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
   const { apply, select, setPending, requestAdd, notify } = useStore.getState();
   const [drag, setDrag] = useState<{ id: string; x: number; y: number } | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const instanceRef = useRef<ReactFlowInstance | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -128,12 +129,17 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
             onAddBefore: () => requestAdd({ side, placement: { kind: "before", to: p.id }, lane: p.lane }),
             onMerge: () => setPending({ kind: "merge", side, from: p.id }),
             onDelete: () => remove(p.id),
+            editing: editingId === p.id,
+            onRenameDone: (name: string | null) => {
+              setEditingId(null);
+              if (name !== null && name !== p.name) apply(side, (m) => updateProcess(m, p.id, { name }));
+            },
           },
         },
       ];
     });
     return [...lanes, ...processes];
-  }, [layout, model, otherLanes, laneIds, diff, side, drag, dropTarget, selection, graph, requestAdd, setPending, remove]);
+  }, [layout, model, otherLanes, laneIds, diff, side, drag, dropTarget, selection, graph, requestAdd, setPending, remove, apply, editingId]);
 
   const ports = useMemo(
     () =>
@@ -321,12 +327,16 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
         onNodeDragStart={(_, node) => node.type === "process" && select({ side, kind: "process", id: node.id })}
         onNodeDragStop={onNodeDragStop}
         onNodeClick={onNodeClick}
+        onNodeDoubleClick={(_, node) => node.type === "process" && setEditingId(node.id)}
         onEdgeClick={(_, edge) => select({ side, kind: "flow", from: edge.source, to: edge.target })}
         onPaneClick={() => {
+          setEditingId(null);
           select(null);
           setPending(null);
         }}
         onMove={onMove}
+        // Double click renames a process; zooming is left to the wheel and controls.
+        zoomOnDoubleClick={false}
         nodesConnectable={false}
         edgesFocusable={false}
         deleteKeyCode={null}

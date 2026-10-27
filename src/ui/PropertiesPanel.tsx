@@ -51,7 +51,8 @@ export function PropertiesPanel({ models, diff, issues, view }: Props) {
           <section>
             <h3>How to edit</h3>
             <p className="muted" style={{ margin: 0, fontSize: 12, lineHeight: 1.5 }}>
-              Hover a connector and click <b>+</b> to insert a process. Select a process for branch, merge and delete
+              Hover a connector and click <b>+</b> to insert a process. Double-click a process to rename it. Select a
+              process for branch, merge and delete
               actions. Drag a process onto another connector to move it there, or into another swimlane to change its
               lane. Ctrl/Cmd+S saves, Ctrl/Cmd+Z undoes.
             </p>
