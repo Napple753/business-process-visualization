@@ -13,6 +13,7 @@ import { buildGraph } from "../core/graph";
 import { LANE_HEADER_HEIGHT, NODE_HEIGHT, NODE_WIDTH, positionOf, type Layout } from "../core/layout";
 import { flowKey, type FlowModel, type Lane, type Side } from "../core/model";
 import { connect, moveProcess, removeProcess, updateProcess } from "../core/mutations";
+import { assignDecisionPorts, type Port } from "../core/ports";
 import { useStore } from "../state/store";
 import type { FlowStatus } from "./diffStyle";
 import { FlowEdge, type FlowEdgeType } from "./edges/FlowEdge";
@@ -121,6 +122,16 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
     return [...lanes, ...processes];
   }, [layout, model, otherLanes, laneIds, diff, side, drag, dropTarget, selection, graph, requestAdd, setPending, remove]);
 
+  const ports = useMemo(
+    () =>
+      assignDecisionPorts(model, (id) => {
+        const p = model.processes.find((q) => q.id === id);
+        const pos = p && positionOf(layout, p.lane, p.id);
+        return pos && { x: pos.x + NODE_WIDTH / 2, y: pos.y + NODE_HEIGHT / 2 };
+      }),
+    [model, layout],
+  );
+
   const edges = useMemo((): FlowEdgeType[] => {
     const known = new Set(model.processes.map((p) => p.id));
     return model.flows
@@ -139,10 +150,12 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
           type: "flow",
           source: f.from,
           target: f.to,
+          sourceHandle: ports.get(key),
           selected: selection?.side === side && selection.kind === "flow" && flowKey(selection) === key,
           markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
           data: {
             label: f.label,
+            port: ports.get(key) ?? null,
             status,
             editable: true,
             dropTarget: isDropTarget,
@@ -153,7 +166,7 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
           },
         };
       });
-  }, [model, diff, side, dropTarget, selection, requestAdd]);
+  }, [model, diff, side, dropTarget, selection, requestAdd, ports]);
 
   const findDropTarget = (id: string, x: number, y: number): DropTarget => {
     const cx = x + NODE_WIDTH / 2;
@@ -165,7 +178,9 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
       const a = processPosition(f.from);
       const b = processPosition(f.to);
       if (!a || !b) continue;
-      const d = distanceToFlow(cx, cy, a.x + NODE_WIDTH / 2, a.y + NODE_HEIGHT, b.x + NODE_WIDTH / 2, b.y);
+      const port = ports.get(flowKey(f)) ?? "bottom";
+      const [sx, sy] = exitPoint(a, port);
+      const d = distanceToFlow(cx, cy, sx, sy, b.x + NODE_WIDTH / 2, b.y, port);
       if (d < bestDistance) {
         bestDistance = d;
         best = { kind: "flow", from: f.from, to: f.to };
@@ -284,9 +299,21 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
   );
 }
 
-/** Distance from a point to the elbow-shaped route used for flows (down, across, down). */
-function distanceToFlow(px: number, py: number, sx: number, sy: number, tx: number, ty: number): number {
+function exitPoint(box: { x: number; y: number }, port: Port): [number, number] {
+  if (port === "left") return [box.x, box.y + NODE_HEIGHT / 2];
+  if (port === "right") return [box.x + NODE_WIDTH, box.y + NODE_HEIGHT / 2];
+  return [box.x + NODE_WIDTH / 2, box.y + NODE_HEIGHT];
+}
+
+/**
+ * Distance from a point to the elbow-shaped route of a flow: down, across, down from
+ * a bottom exit, or across then down from a side exit.
+ */
+function distanceToFlow(px: number, py: number, sx: number, sy: number, tx: number, ty: number, port: Port): number {
   if (ty <= sy) return distanceToSegment(px, py, sx, sy, tx, ty);
+  if (port !== "bottom") {
+    return Math.min(distanceToSegment(px, py, sx, sy, tx, sy), distanceToSegment(px, py, tx, sy, tx, ty));
+  }
   const my = (sy + ty) / 2;
   return Math.min(
     distanceToSegment(px, py, sx, sy, sx, my),

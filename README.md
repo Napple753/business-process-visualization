@@ -25,6 +25,7 @@ standalone executable and is never added to the repositories it edits.
 | Move a process | Drag it onto another connector |
 | Change swimlane | Drag it into another column, or use the properties panel |
 | Connector label | Click the connector |
+| Decision outcomes | Flows leave a decision from its left, bottom or right vertex, chosen from where the target is; each label sits beside its vertex |
 | Undo / redo | Ctrl+Z / Ctrl+Shift+Z (Cmd on macOS) |
 
 ## Data format

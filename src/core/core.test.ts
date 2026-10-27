@@ -4,6 +4,7 @@ import { layoutModels, mergeLanes, positionOf } from "./layout";
 import type { FlowModel, Process } from "./model";
 import { insertBetween, moveProcess, removeProcess, updateProcess } from "./mutations";
 import { parseFlowYaml } from "./parse";
+import { assignDecisionPorts } from "./ports";
 import { serializeFlowYaml } from "./serialize";
 import { slugify, uniqueSlug } from "./slug";
 import { validateModel } from "./validate";
@@ -226,5 +227,35 @@ describe("mutations", () => {
       { from: "c", to: "b" },
       { from: "b", to: "d" },
     ]);
+  });
+});
+
+describe("decision ports", () => {
+  const decision = (targets: Record<string, { x: number; y: number }>): Map<string, string> => {
+    const m: FlowModel = {
+      version: 1,
+      lanes: [{ id: "l", name: "l" }],
+      processes: [{ ...proc("d"), type: "decision" }, ...Object.keys(targets).map((id) => proc(id))],
+      flows: Object.keys(targets).map((to) => ({ from: "d", to })),
+    };
+    const centers: Record<string, { x: number; y: number }> = { d: { x: 0, y: 0 }, ...targets };
+    return assignDecisionPorts(m, (id) => centers[id]);
+  };
+
+  it("leaves towards the target's direction", () => {
+    const ports = decision({ below: { x: 0, y: 100 }, right: { x: 400, y: 100 } });
+    expect(ports.get("d->below")).toBe("bottom");
+    expect(ports.get("d->right")).toBe("right");
+  });
+
+  it("spreads flows that prefer the same vertex", () => {
+    const ports = decision({ a: { x: 0, y: 100 }, b: { x: 20, y: 300 } });
+    expect(new Set(ports.values()).size).toBe(2);
+    expect(ports.get("d->a")).toBe("bottom");
+  });
+
+  it("uses all three vertices in left-to-right order", () => {
+    const ports = decision({ l: { x: -400, y: 100 }, m: { x: 0, y: 100 }, r: { x: 400, y: 100 } });
+    expect([ports.get("d->l"), ports.get("d->m"), ports.get("d->r")]).toEqual(["left", "bottom", "right"]);
   });
 });

@@ -48,7 +48,16 @@ export function ProcessNode({ data, selected }: NodeProps<ProcessNodeType>) {
         </div>
       )}
       {meta && <span className="meta">{meta}</span>}
-      <Handle type="source" position={Position.Bottom} isConnectable={false} />
+      {process.type === "decision" ? (
+        // A decision exits from its left, bottom or right vertex (see core/ports).
+        <>
+          <Handle type="source" id="left" position={Position.Left} isConnectable={false} />
+          <Handle type="source" id="bottom" position={Position.Bottom} isConnectable={false} />
+          <Handle type="source" id="right" position={Position.Right} isConnectable={false} />
+        </>
+      ) : (
+        <Handle type="source" position={Position.Bottom} isConnectable={false} />
+      )}
       {data.editable && (
         <NodeToolbar position={Position.Top} offset={16}>
           <div className="node-toolbar" onMouseDown={(e) => e.stopPropagation()}>
