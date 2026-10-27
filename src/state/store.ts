@@ -175,7 +175,12 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setView(view) {
-    set({ view, selection: null, pending: null, ...(view !== "compare" && { activeSide: view }) });
+    set({
+      view,
+      selection: carrySelection(get().selection, view, get().current?.sides),
+      pending: null,
+      ...(view !== "compare" && { activeSide: view }),
+    });
   },
 
   select(selection) {
@@ -346,6 +351,25 @@ function dropStaleSelection(side: Side, model: FlowModel) {
       ? model.processes.some((p) => p.id === selection.id)
       : model.flows.some((f) => f.from === selection.from && f.to === selection.to);
   if (!stillThere) useStore.setState({ selection: null });
+}
+
+/**
+ * Keeps the selection across a view switch: a single-side view takes over the same
+ * process or flow from the other side when it exists there.
+ */
+function carrySelection(
+  selection: Selection,
+  view: ViewMode,
+  sides: Partial<Record<Side, SideState>> | undefined,
+): Selection {
+  if (!selection || view === "compare" || selection.side === view) return selection;
+  const model = sides?.[view]?.model;
+  if (!model) return null;
+  const exists =
+    selection.kind === "process"
+      ? model.processes.some((p) => p.id === selection.id)
+      : model.flows.some((f) => f.from === selection.from && f.to === selection.to);
+  return exists ? { ...selection, side: view } : null;
 }
 
 function normalize(path: string): string {

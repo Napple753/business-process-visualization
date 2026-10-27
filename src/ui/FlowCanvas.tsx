@@ -24,9 +24,13 @@ const nodeTypes = { lane: LaneNode, process: ProcessNode };
 const edgeTypes = { flow: FlowEdge };
 const DROP_DISTANCE = 32;
 const FIT_OPTIONS = { padding: 0.06, maxZoom: 1 };
+const REVEAL_MARGIN = 24;
 
+/** Shared between the panes of one process screen. */
 export interface ViewportSync {
   instances: Map<Side, ReactFlowInstance>;
+  /** Viewport to start from when panes are recreated (view switch); null fits the content. */
+  viewport: Viewport | null;
 }
 
 interface Props {
@@ -49,7 +53,16 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
   const [dropTarget, setDropTarget] = useState<DropTarget>(null);
 
   const instanceRef = useRef<ReactFlowInstance | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const fittedWidth = useRef(layout.width);
+  const startViewport = useRef(sync.viewport).current;
+
+  useEffect(
+    () => () => {
+      if (sync.instances.get(side) === instanceRef.current) sync.instances.delete(side);
+    },
+    [sync, side],
+  );
 
   // Refit when columns are added or widened; growing taller keeps the user's viewport.
   useEffect(() => {
@@ -243,6 +256,38 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
     select({ side, kind: "process", id: node.id });
   };
 
+  const onInit = (instance: ReactFlowInstance) => {
+    instanceRef.current = instance;
+    sync.instances.set(side, instance);
+    if (!sync.viewport) return;
+    // A pane created by a view switch continues from the previous viewport. Another
+    // pane may already have adjusted it to reveal the selection, so read it again.
+    void instance.setViewport(sync.viewport);
+    const revealed = revealSelection(sync.viewport);
+    if (revealed) {
+      sync.viewport = revealed;
+      for (const other of sync.instances.values()) void other.setViewport(revealed, { duration: 150 });
+    }
+  };
+
+  /** Viewport scrolled just enough to show the selected process, or null when it is already visible. */
+  const revealSelection = (viewport: Viewport): Viewport | null => {
+    const sel = useStore.getState().selection;
+    const el = containerRef.current;
+    if (sel?.side !== side || sel.kind !== "process" || !el) return null;
+    const pos = processPosition(sel.id);
+    if (!pos) return null;
+    const { x, y, zoom } = viewport;
+    const shift = (start: number, end: number, size: number) => {
+      if (end > size - REVEAL_MARGIN) return Math.max(size - REVEAL_MARGIN - end, REVEAL_MARGIN - start);
+      if (start < REVEAL_MARGIN) return REVEAL_MARGIN - start;
+      return 0;
+    };
+    const dx = shift(pos.x * zoom + x, (pos.x + NODE_WIDTH) * zoom + x, el.clientWidth);
+    const dy = shift(pos.y * zoom + y, (pos.y + NODE_HEIGHT) * zoom + y, el.clientHeight);
+    return dx || dy ? { x: x + dx, y: y + dy, zoom } : null;
+  };
+
   const onMove = (event: MouseEvent | TouchEvent | null, viewport: Viewport) => {
     if (!event) return;
     for (const [other, instance] of sync.instances) {
@@ -263,15 +308,14 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
         </div>
       )}
       <ReactFlow
+        ref={containerRef}
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        onInit={(instance) => {
-          instanceRef.current = instance as unknown as ReactFlowInstance;
-          sync.instances.set(side, instance as unknown as ReactFlowInstance);
-        }}
-        fitView
+        onInit={(instance) => onInit(instance as unknown as ReactFlowInstance)}
+        defaultViewport={startViewport ?? undefined}
+        fitView={!startViewport}
         fitViewOptions={FIT_OPTIONS}
         onNodesChange={onNodesChange}
         onNodeDragStart={(_, node) => node.type === "process" && select({ side, kind: "process", id: node.id })}

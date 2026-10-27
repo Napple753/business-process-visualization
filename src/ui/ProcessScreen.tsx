@@ -54,7 +54,14 @@ export function ProcessScreen() {
     };
   }, [models, notify]);
 
-  const sync = useRef<ViewportSync>({ instances: new Map() }).current;
+  const sync = useRef<ViewportSync>({ instances: new Map(), viewport: null }).current;
+  const switchView = (next: ViewMode) => {
+    // Panes are recreated for the new view; they continue from the current viewport.
+    const { activeSide } = useStore.getState();
+    const source = sync.instances.get(activeSide) ?? [...sync.instances.values()][0];
+    if (source) sync.viewport = source.getViewport();
+    setView(next);
+  };
   useKeyboardShortcuts();
 
   const dirty = !!(asis?.dirty || tobe?.dirty);
@@ -76,7 +83,7 @@ export function ProcessScreen() {
         <h1>{current.entry.title}</h1>
         <span className="muted mono">{current.entry.folder}/</span>
         <span className="spacer" />
-        <ViewToggle view={view} hasAsis={!!asis} hasTobe={!!tobe} onChange={setView} />
+        <ViewToggle view={view} hasAsis={!!asis} hasTobe={!!tobe} onChange={switchView} />
         {!tobe && asis && (
           <button onClick={() => createTobe(current.entry).catch((e) => notify({ level: "error", text: String(e) }))}>
             Create To-Be from As-Is
@@ -99,7 +106,7 @@ export function ProcessScreen() {
             const state = current.sides[side];
             const other = current.sides[side === "asis" ? "tobe" : "asis"];
             return (
-              // Keyed by view so that each canvas fits its content again after switching.
+              // Keyed by view: panes are recreated on a switch and start from sync.viewport.
               <section key={`${view}-${side}`} className="pane" aria-label={SIDE_NAMES[side]}>
                 <PaneHeader side={side} state={state} />
                 <div className="pane-body">

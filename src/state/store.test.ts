@@ -55,4 +55,16 @@ describe("store", () => {
     useStore.getState().redo("asis");
     expect(name()).toBe("Changed");
   });
+
+  it("keeps the selection when switching to a side that has the same process", () => {
+    const s = useStore.getState();
+    s.setView("compare");
+    s.select({ side: "asis", kind: "process", id: "pack-items" });
+    useStore.getState().setView("tobe");
+    expect(useStore.getState().selection).toEqual({ side: "tobe", kind: "process", id: "pack-items" });
+    useStore.getState().select({ side: "tobe", kind: "flow", from: "pick-items", to: "print-label" });
+    useStore.getState().setView("asis");
+    // As-Is has no pick-items -> print-label flow, so the selection is dropped.
+    expect(useStore.getState().selection).toBeNull();
+  });
 });
