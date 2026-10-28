@@ -8,7 +8,7 @@ import { validateModel } from "../core/validate";
 import { useStore, type SideState, type ViewMode } from "../state/store";
 import { AddNodeDialog } from "./AddNodeDialog";
 import { NoticeBar } from "./App";
-import { FlowCanvas, pushViewport, type ViewportSync } from "./FlowCanvas";
+import { FlowCanvas, pushViewport, sameViewport, type ViewportSync } from "./FlowCanvas";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { measureProcessHeight } from "./measure";
 
@@ -55,7 +55,14 @@ export function ProcessScreen() {
     };
   }, [models, notify]);
 
-  const sync = useRef<ViewportSync>({ instances: new Map(), viewport: null, linked: true, applying: false, lastMoved: null }).current;
+  const sync = useRef<ViewportSync>({
+    instances: new Map(),
+    viewport: null,
+    started: new Map(),
+    linked: true,
+    applying: false,
+    lastMoved: null,
+  }).current;
   const [linked, setLinked] = useState(sync.linked);
   const toggleLinked = () => {
     sync.linked = !sync.linked;
@@ -67,10 +74,12 @@ export function ProcessScreen() {
     if (source) pushViewport(sync, from, source.getViewport());
   };
   const switchView = (next: ViewMode) => {
-    // Panes are recreated for the new view; they continue from the current viewport.
-    const { activeSide } = useStore.getState();
-    const source = sync.instances.get(activeSide) ?? [...sync.instances.values()][0];
-    if (source) sync.viewport = source.getViewport();
+    // Panes are recreated for the new view and continue from the viewport they were
+    // last moved to; when untouched, from the one the current panes started with.
+    const from = sync.lastMoved && sync.instances.has(sync.lastMoved) ? sync.lastMoved : [...sync.instances.keys()][0];
+    const current = from && sync.instances.get(from)?.getViewport();
+    const started = from && sync.started.get(from);
+    if (current && !(started && sameViewport(current, started))) sync.viewport = current;
     setView(next);
   };
   useKeyboardShortcuts();

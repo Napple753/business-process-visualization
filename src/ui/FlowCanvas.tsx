@@ -1,5 +1,6 @@
 import {
   Background,
+  ControlButton,
   Controls,
   MarkerType,
   ReactFlow,
@@ -24,14 +25,25 @@ import { ProcessNode, type ProcessNodeType } from "./nodes/ProcessNode";
 const nodeTypes = { lane: LaneNode, process: ProcessNode };
 const edgeTypes = { flow: FlowEdge };
 const DROP_DISTANCE = 32;
-const FIT_OPTIONS = { padding: 0.06, maxZoom: 1 };
 const REVEAL_MARGIN = 24;
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 2;
+/** Fitting the swimlanes into the pane never enlarges them beyond this. */
+const MAX_FIT_ZOOM = 1;
+const ZOOM_STEP = 1.2;
+const ANIMATION_MS = 200;
 
 /** Shared between the panes of one process screen. */
 export interface ViewportSync {
   instances: Map<Side, ReactFlowInstance>;
-  /** Viewport to start from when panes are recreated (view switch); null fits the content. */
+  /**
+   * Viewport to start from when panes are recreated (view switch); null fits the content.
+   * It is replaced only when the panes were moved since they were created, so that the
+   * adjustment a pane of a different size needs is undone when switching back.
+   */
   viewport: Viewport | null;
+  /** Viewport each pane started from; a pane still showing it was not moved. */
+  started: Map<Side, Viewport>;
   /** When true, every viewport change of one pane is applied to the others. */
   linked: boolean;
   /** Set while a change is being applied to the other panes, so that it is not echoed back. */
@@ -81,6 +93,13 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
   const containerRef = useRef<HTMLDivElement>(null);
   const fittedWidth = useRef(layout.width);
   const startViewport = useRef(sync.viewport).current;
+  /**
+   * End time of the running animated change, whose frames are left unclamped (its
+   * target is clamped). A time because an interrupted animation never settles its promise.
+   */
+  const animatingUntil = useRef(0);
+  const animationTarget = useRef<Viewport | null>(null);
+  const lastViewport = useRef<Viewport | null>(null);
 
   useEffect(
     () => () => {
@@ -95,7 +114,7 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
     if (layout.width === fittedWidth.current) return;
     fittedWidth.current = layout.width;
     if (sync.linked && [...sync.instances.keys()][0] !== side) return;
-    requestAnimationFrame(() => void instanceRef.current?.fitView({ ...FIT_OPTIONS, duration: 200 }));
+    requestAnimationFrame(() => animateTo(fitViewport()));
   }, [layout.width, sync, side]);
 
   const graph = useMemo(() => buildGraph(model), [model]);
@@ -113,14 +132,6 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
     const laneNames = new Map([...otherLanes, ...model.lanes].map((l) => [l.id, l.name]));
     return layout.lanes.map((col) => ({ ...col, name: laneNames.get(col.id) ?? col.id, ghost: !laneIds.has(col.id) }));
   }, [layout, model, otherLanes, laneIds]);
-  // Panning stops at the edges of the swimlanes.
-  const translateExtent = useMemo(
-    (): [[number, number], [number, number]] => [
-      [0, 0],
-      [layout.width, laneHeight],
-    ],
-    [layout.width, laneHeight],
-  );
 
   const nodes = useMemo(() => {
     const lanes: LaneNodeType[] = layout.lanes.map((col, i) => ({
@@ -300,18 +311,66 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
     select({ side, kind: "process", id: node.id });
   };
 
+  const paneSize = () => {
+    const el = containerRef.current;
+    return el ? { width: el.clientWidth, height: el.clientHeight } : null;
+  };
+
+  /** Keeps the swimlanes in view, at the top-left corner along an axis where they fit the pane. */
+  const clamp = (viewport: Viewport): Viewport => {
+    const pane = paneSize();
+    if (!pane) return viewport;
+    const axis = (offset: number, paneLength: number, contentLength: number) =>
+      contentLength <= paneLength ? 0 : Math.min(0, Math.max(paneLength - contentLength, offset));
+    const { x, y, zoom } = viewport;
+    return { x: axis(x, pane.width, layout.width * zoom), y: axis(y, pane.height, laneHeight * zoom), zoom };
+  };
+
+  /** Largest zoom (up to MAX_FIT_ZOOM) that shows all swimlanes, aligned to the top-left corner. */
+  const fitViewport = (): Viewport => {
+    const pane = paneSize();
+    if (!pane || !layout.width) return { x: 0, y: 0, zoom: MAX_FIT_ZOOM };
+    const zoom = Math.min(pane.width / layout.width, pane.height / laneHeight, MAX_FIT_ZOOM);
+    return { x: 0, y: 0, zoom: Math.max(MIN_ZOOM, zoom) };
+  };
+
+  const animateTo = (viewport: Viewport) => {
+    const instance = instanceRef.current;
+    if (!instance) return;
+    const target = clamp(viewport);
+    animatingUntil.current = performance.now() + ANIMATION_MS + 50;
+    animationTarget.current = target;
+    void instance.setViewport(target, { duration: ANIMATION_MS });
+  };
+
+  /** Zooms around the center of the pane. */
+  const zoomBy = (factor: number) => {
+    const instance = instanceRef.current;
+    const pane = paneSize();
+    if (!instance || !pane) return;
+    // Repeated clicks build on the running animation's target, not on its current frame.
+    const animating = performance.now() <= animatingUntil.current && animationTarget.current;
+    const { x, y, zoom } = animating || instance.getViewport();
+    const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * factor));
+    const cx = pane.width / 2;
+    const cy = pane.height / 2;
+    animateTo({ x: cx - ((cx - x) / zoom) * next, y: cy - ((cy - y) / zoom) * next, zoom: next });
+  };
+
   const onInit = (instance: ReactFlowInstance) => {
     instanceRef.current = instance;
     sync.instances.set(side, instance);
-    if (!sync.viewport) return;
-    // A pane created by a view switch continues from the previous viewport. Another
-    // pane may already have adjusted it to reveal the selection, so read it again.
-    void instance.setViewport(sync.viewport);
-    const revealed = revealSelection(sync.viewport);
+    // A pane created by a view switch continues from the previous viewport; the first
+    // panes fit the swimlanes. Another pane may already have adjusted the viewport to
+    // reveal the selection, so read it again.
+    const start = clamp(sync.viewport ?? fitViewport());
+    void instance.setViewport(start);
+    sync.started.set(side, start);
+    const revealed = revealSelection(start);
     if (revealed) {
-      sync.viewport = revealed;
-      // Linked panes follow each frame of the animation through onMove.
-      void instance.setViewport(revealed, { duration: 150 });
+      // Revealing counts as a move. Linked panes follow its frames through onMove.
+      sync.viewport = clamp(revealed);
+      animateTo(revealed);
     }
   };
 
@@ -335,7 +394,21 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
     return dx || dy ? { x: x + dx, y: y + dy, zoom } : null;
   };
 
-  const onMove = (_: unknown, viewport: Viewport) => pushViewport(sync, side, viewport);
+  const onMove = (_: unknown, viewport: Viewport) => {
+    // Start and end are also reported for viewports already handled (end even later, on a timer).
+    if (lastViewport.current && sameViewport(lastViewport.current, viewport)) return;
+    lastViewport.current = viewport;
+    // A pane following another one takes its viewport as is.
+    if (!sync.applying && performance.now() > animatingUntil.current) {
+      const clamped = clamp(viewport);
+      if (clamped.x !== viewport.x || clamped.y !== viewport.y) {
+        // Applied synchronously; its own onMove passes the result on to the other panes.
+        void instanceRef.current?.setViewport(clamped);
+        return;
+      }
+    }
+    pushViewport(sync, side, viewport);
+  };
 
   const mergingHere = pending?.kind === "merge" && pending.side === side;
 
@@ -357,8 +430,6 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
         edgeTypes={edgeTypes}
         onInit={(instance) => onInit(instance as unknown as ReactFlowInstance)}
         defaultViewport={startViewport ?? undefined}
-        fitView={!startViewport}
-        fitViewOptions={FIT_OPTIONS}
         onNodesChange={onNodesChange}
         onNodeDragStart={(_, node) => node.type === "process" && select({ side, kind: "process", id: node.id })}
         onNodeDragStop={onNodeDragStop}
@@ -370,28 +441,51 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
           select(null);
           setPending(null);
         }}
+        // The first wheel event of a scroll only reports a start, so handle all three.
+        onMoveStart={onMove}
         onMove={onMove}
+        onMoveEnd={onMove}
         // The wheel scrolls; Ctrl/Cmd + wheel (or a pinch) zooms. Double click renames a process.
         panOnScroll
         panOnScrollSpeed={1}
         zoomActivationKeyCode={["Meta", "Control"]}
         zoomOnDoubleClick={false}
-        translateExtent={translateExtent}
         nodesConnectable={false}
         edgesFocusable={false}
         deleteKeyCode={null}
         selectionKeyCode={null}
         multiSelectionKeyCode={null}
-        minZoom={0.2}
-        maxZoom={2}
+        minZoom={MIN_ZOOM}
+        maxZoom={MAX_ZOOM}
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={24} size={1} />
         <LaneHeaders lanes={headers} />
-        <Controls showInteractive={false} />
+        {/* Own buttons so that zooming and fitting keep the swimlanes clamped. */}
+        <Controls showZoom={false} showFitView={false} showInteractive={false}>
+          <ControlButton onClick={() => zoomBy(ZOOM_STEP)} title="Zoom in" aria-label="Zoom in">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+              <path d="M32 18.133H18.133V32h-4.266V18.133H0v-4.266h13.867V0h4.266v13.867H32z" />
+            </svg>
+          </ControlButton>
+          <ControlButton onClick={() => zoomBy(1 / ZOOM_STEP)} title="Zoom out" aria-label="Zoom out">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 5">
+              <path d="M0 0h32v4.2H0z" />
+            </svg>
+          </ControlButton>
+          <ControlButton onClick={() => animateTo(fitViewport())} title="Fit view" aria-label="Fit view">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 30">
+              <path d="M3.692 4.63c0-.53.4-.938.939-.938h5.215V0H4.708C2.13 0 0 2.054 0 4.63v5.216h3.692V4.631zM27.354 0h-5.2v3.692h5.17c.53 0 .984.4.984.939v5.215H32V4.631A4.624 4.624 0 0027.354 0zm.954 24.83c0 .532-.4.94-.939.94h-5.215v3.768h5.215c2.577 0 4.631-2.13 4.631-4.707v-5.139h-3.692v5.139zm-23.677.94c-.531 0-.939-.4-.939-.94v-5.138H0v5.139c0 2.577 2.13 4.707 4.708 4.707h5.138V25.77H4.631z" />
+            </svg>
+          </ControlButton>
+        </Controls>
       </ReactFlow>
     </>
   );
+}
+
+export function sameViewport(a: Viewport, b: Viewport): boolean {
+  return a.x === b.x && a.y === b.y && a.zoom === b.zoom;
 }
 
 function exitPoint(box: { x: number; y: number }, height: number, port: Port): [number, number] {
