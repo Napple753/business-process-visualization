@@ -32,6 +32,29 @@ export interface ViewportSync {
   instances: Map<Side, ReactFlowInstance>;
   /** Viewport to start from when panes are recreated (view switch); null fits the content. */
   viewport: Viewport | null;
+  /** When true, every viewport change of one pane is applied to the others. */
+  linked: boolean;
+  /** Set while a change is being applied to the other panes, so that it is not echoed back. */
+  applying: boolean;
+  /** Pane whose viewport changed last on its own; re-linking aligns the others to it. */
+  lastMoved: Side | null;
+}
+
+/** Applies a pane's viewport to the other panes. */
+export function pushViewport(sync: ViewportSync, from: Side, viewport: Viewport) {
+  if (sync.applying) return;
+  sync.lastMoved = from;
+  if (!sync.linked) return;
+  sync.applying = true;
+  try {
+    // Without a duration React Flow applies the viewport synchronously, so the
+    // resulting onMove of each pane runs while `applying` is still set.
+    for (const [side, instance] of sync.instances) {
+      if (side !== from) void instance.setViewport(viewport);
+    }
+  } finally {
+    sync.applying = false;
+  }
 }
 
 interface Props {
@@ -67,11 +90,13 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
   );
 
   // Refit when columns are added or widened; growing taller keeps the user's viewport.
+  // Linked panes follow the first one instead of fitting themselves.
   useEffect(() => {
     if (layout.width === fittedWidth.current) return;
     fittedWidth.current = layout.width;
+    if (sync.linked && [...sync.instances.keys()][0] !== side) return;
     requestAnimationFrame(() => void instanceRef.current?.fitView({ ...FIT_OPTIONS, duration: 200 }));
-  }, [layout.width]);
+  }, [layout.width, sync, side]);
 
   const graph = useMemo(() => buildGraph(model), [model]);
   const laneIds = useMemo(() => new Set(model.lanes.map((l) => l.id)), [model]);
@@ -285,7 +310,8 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
     const revealed = revealSelection(sync.viewport);
     if (revealed) {
       sync.viewport = revealed;
-      for (const other of sync.instances.values()) void other.setViewport(revealed, { duration: 150 });
+      // Linked panes follow each frame of the animation through onMove.
+      void instance.setViewport(revealed, { duration: 150 });
     }
   };
 
@@ -309,12 +335,7 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
     return dx || dy ? { x: x + dx, y: y + dy, zoom } : null;
   };
 
-  const onMove = (event: MouseEvent | TouchEvent | null, viewport: Viewport) => {
-    if (!event) return;
-    for (const [other, instance] of sync.instances) {
-      if (other !== side) void instance.setViewport(viewport);
-    }
-  };
+  const onMove = (_: unknown, viewport: Viewport) => pushViewport(sync, side, viewport);
 
   const mergingHere = pending?.kind === "merge" && pending.side === side;
 

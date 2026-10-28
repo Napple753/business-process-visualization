@@ -8,7 +8,7 @@ import { validateModel } from "../core/validate";
 import { useStore, type SideState, type ViewMode } from "../state/store";
 import { AddNodeDialog } from "./AddNodeDialog";
 import { NoticeBar } from "./App";
-import { FlowCanvas, type ViewportSync } from "./FlowCanvas";
+import { FlowCanvas, pushViewport, type ViewportSync } from "./FlowCanvas";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { measureProcessHeight } from "./measure";
 
@@ -55,7 +55,17 @@ export function ProcessScreen() {
     };
   }, [models, notify]);
 
-  const sync = useRef<ViewportSync>({ instances: new Map(), viewport: null }).current;
+  const sync = useRef<ViewportSync>({ instances: new Map(), viewport: null, linked: true, applying: false, lastMoved: null }).current;
+  const [linked, setLinked] = useState(sync.linked);
+  const toggleLinked = () => {
+    sync.linked = !sync.linked;
+    setLinked(sync.linked);
+    if (!sync.linked) return;
+    // Re-linking aligns the other pane with the one moved last.
+    const from = sync.lastMoved && sync.instances.has(sync.lastMoved) ? sync.lastMoved : [...sync.instances.keys()][0];
+    const source = from && sync.instances.get(from);
+    if (source) pushViewport(sync, from, source.getViewport());
+  };
   const switchView = (next: ViewMode) => {
     // Panes are recreated for the new view; they continue from the current viewport.
     const { activeSide } = useStore.getState();
@@ -85,6 +95,16 @@ export function ProcessScreen() {
         <span className="muted mono">{current.entry.folder}/</span>
         <span className="spacer" />
         <ViewToggle view={view} hasAsis={!!asis} hasTobe={!!tobe} onChange={switchView} />
+        {view === "compare" && (
+          <button
+            className={linked ? "toggle active" : "toggle"}
+            aria-pressed={linked}
+            onClick={toggleLinked}
+            title="Scroll and zoom both sides together"
+          >
+            Link views
+          </button>
+        )}
         {!tobe && asis && (
           <button onClick={() => createTobe(current.entry).catch((e) => notify({ level: "error", text: String(e) }))}>
             Create To-Be from As-Is

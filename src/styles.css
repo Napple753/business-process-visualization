@@ -207,7 +207,8 @@ label.field > span {
   border-right: none;
 }
 
-.segmented button.active {
+.segmented button.active,
+button.toggle.active {
   background: var(--accent);
   color: var(--accent-text);
 }
