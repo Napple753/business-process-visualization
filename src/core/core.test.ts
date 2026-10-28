@@ -160,6 +160,30 @@ describe("diff", () => {
     expect(d.processes.get("b")!.kinds).toContain("laneChanged");
     expect(d.processes.get("c")!.kinds).toEqual(["removed"]);
   });
+
+  it("ignores formatting-only differences in attributes", () => {
+    const asis = chain(["a", "b"]);
+    asis.processes[0].description = "Order arrives by fax.";
+    asis.processes[0].systems = ["ERP", "Mail"];
+    asis.processes[1].documents = [];
+    const tobe = structuredClone(asis);
+    tobe.processes[0].name = " a ";
+    tobe.processes[0].description = "Order arrives\nby fax.\n";
+    tobe.processes[0].systems = ["Mail", " ERP"];
+    delete tobe.processes[1].documents;
+    const d = diffModels(asis, tobe);
+    expect(d.processes.get("a")!.kinds).toEqual([]);
+    expect(d.processes.get("b")!.kinds).toEqual([]);
+  });
+
+  it("reports real attribute changes as modified", () => {
+    const asis = chain(["a"]);
+    const tobe = structuredClone(asis);
+    tobe.processes[0].systems = ["ERP"];
+    const d = diffModels(asis, tobe);
+    expect(d.processes.get("a")!.kinds).toEqual(["modified"]);
+    expect(d.processes.get("a")!.changedFields).toEqual(["systems"]);
+  });
 });
 
 describe("layout", () => {

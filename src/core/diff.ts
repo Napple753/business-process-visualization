@@ -41,7 +41,7 @@ export function diffModels(asis: FlowModel, tobe: FlowModel): ModelDiff {
       continue;
     }
     const kinds: ChangeKind[] = [];
-    if (pa.name !== pb.name) kinds.push("renamed");
+    if (normalizeText(pa.name) !== normalizeText(pb.name)) kinds.push("renamed");
     if (pa.lane !== pb.lane) kinds.push("laneChanged");
     if (moved.has(id)) kinds.push("moved");
     const changedFields = OTHER_FIELDS.filter((f) => !sameField(pa, pb, f));
@@ -110,6 +110,24 @@ function edgeSet(succ: Map<string, Set<string>>): Set<string> {
   return edges;
 }
 
+/**
+ * Compares fields by meaning rather than by spelling: whitespace and line breaks in
+ * text do not count, an empty value equals a missing one, and lists are compared as
+ * sets (order and duplicates do not count).
+ */
 function sameField(a: Process, b: Process, field: (typeof OTHER_FIELDS)[number]): boolean {
-  return JSON.stringify(a[field] ?? null) === JSON.stringify(b[field] ?? null);
+  if (field === "type" || field === "description") {
+    return normalizeText(a[field]) === normalizeText(b[field]);
+  }
+  const sa = normalizeList(a[field]);
+  const sb = normalizeList(b[field]);
+  return sa.size === sb.size && [...sa].every((v) => sb.has(v));
+}
+
+function normalizeText(value: string | undefined): string {
+  return (value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeList(values: string[] | undefined): Set<string> {
+  return new Set((values ?? []).map(normalizeText).filter(Boolean));
 }
