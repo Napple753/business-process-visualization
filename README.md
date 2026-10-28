@@ -13,7 +13,7 @@ standalone executable and is never added to the repositories it edits.
 
 ## Usage
 
-1. Start `process-workbench.exe`.
+1. Extract `process-workbench-windows.zip` from the release and start `process-workbench.exe`.
 2. Choose your repository folder (or its `business-processes/` folder).
 3. Pick a process from the list. Edit, then save with Ctrl+S.
 4. Review and commit the changes with Git as usual.
