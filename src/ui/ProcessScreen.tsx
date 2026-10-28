@@ -10,6 +10,7 @@ import { AddNodeDialog } from "./AddNodeDialog";
 import { NoticeBar } from "./App";
 import { FlowCanvas, type ViewportSync } from "./FlowCanvas";
 import { PropertiesPanel } from "./PropertiesPanel";
+import { measureProcessHeight } from "./measure";
 
 const SIDE_NAMES: Record<Side, string> = { asis: "As-Is", tobe: "To-Be" };
 
@@ -46,7 +47,7 @@ export function ProcessScreen() {
   useEffect(() => {
     let cancelled = false;
     const list = [models.asis, models.tobe].filter((m): m is FlowModel => !!m);
-    layoutModels(list)
+    layoutModels(list, measureProcessHeight)
       .then((l) => !cancelled && setLayout(l))
       .catch((e) => notify({ level: "error", text: `Layout failed: ${String(e)}` }));
     return () => {

@@ -1,7 +1,8 @@
 import ELK from "elkjs/lib/elk.bundled.js";
-import type { FlowModel, Lane } from "./model";
+import type { FlowModel, Lane, Process } from "./model";
 
 export const NODE_WIDTH = 180;
+/** Minimum height of a process box; boxes grow to fit long names (see layoutModels). */
 export const NODE_HEIGHT = 64;
 const SLOT_GAP = 32;
 const LANE_PADDING = 28;
@@ -17,6 +18,8 @@ export interface LaneColumn {
 export interface Layout {
   /** Top-left corner of each process box, keyed by "lane/id" (see positionOf). */
   positions: Map<string, { x: number; y: number }>;
+  /** Height of each process box, keyed by process id. */
+  heights: Map<string, number>;
   /** Layer (row) index of each process. */
   layers: Map<string, number>;
   lanes: LaneColumn[];
@@ -33,8 +36,11 @@ const elk = new ELK();
  * process id), so a process present in several models gets the same row in each and
  * a process present in only one lands on an intermediate row. Columns are swimlanes;
  * processes sharing a lane and a row are placed side by side in ELK's order.
+ *
+ * `measure` gives the height a process box needs; a process present in several models
+ * takes the largest, and each row is as tall as its tallest box.
  */
-export async function layoutModels(models: FlowModel[]): Promise<Layout> {
+export async function layoutModels(models: FlowModel[], measure?: (p: Process) => number): Promise<Layout> {
   const laneOrder = mergeLanes(models.map((m) => m.lanes));
   const known = new Set(models.flatMap((m) => m.processes.map((p) => p.id)));
   const nodeIds = [...known];
@@ -95,8 +101,23 @@ export async function layoutModels(models: FlowModel[]): Promise<Layout> {
   }
   const laneX = new Map(lanes.map((l) => [l.id, l]));
 
+  const heights = new Map<string, number>();
+  for (const m of models) {
+    for (const p of m.processes) {
+      const h = Math.max(NODE_HEIGHT, measure?.(p) ?? NODE_HEIGHT);
+      heights.set(p.id, Math.max(heights.get(p.id) ?? 0, h));
+    }
+  }
+  const rowHeights = rowYs.map(() => NODE_HEIGHT);
+  for (const [id, row] of layers) rowHeights[row] = Math.max(rowHeights[row], heights.get(id) ?? NODE_HEIGHT);
+  const rowTops: number[] = [];
+  let y = LANE_HEADER_HEIGHT + LAYER_GAP / 2;
+  for (const h of rowHeights) {
+    rowTops.push(y);
+    y += h + LAYER_GAP;
+  }
+
   const positions = new Map<string, { x: number; y: number }>();
-  const rowHeight = NODE_HEIGHT + LAYER_GAP;
   for (const [key, group] of slotGroups) {
     const [laneId, row] = key.split("#");
     const lane = laneX.get(laneId);
@@ -104,25 +125,33 @@ export async function layoutModels(models: FlowModel[]): Promise<Layout> {
     // Center the group inside the lane column.
     const groupWidth = group.length * NODE_WIDTH + (group.length - 1) * SLOT_GAP;
     const startX = lane.x + (lane.width - groupWidth) / 2;
+    const r = Number(row);
     group.forEach((id, i) => {
+      // Vertically center boxes shorter than their row.
+      const h = heights.get(id) ?? NODE_HEIGHT;
       positions.set(`${laneId}/${id}`, {
         x: startX + i * (NODE_WIDTH + SLOT_GAP),
-        y: LANE_HEADER_HEIGHT + LAYER_GAP / 2 + Number(row) * rowHeight,
+        y: (rowTops[r] ?? 0) + ((rowHeights[r] ?? NODE_HEIGHT) - h) / 2,
       });
     });
   }
 
   return {
     positions,
+    heights,
     layers,
     lanes,
     width: x,
-    height: LANE_HEADER_HEIGHT + Math.max(rowYs.length, 1) * rowHeight,
+    height: rowYs.length ? y - LAYER_GAP / 2 : LANE_HEADER_HEIGHT + NODE_HEIGHT + LAYER_GAP,
   };
 }
 
 export function positionOf(layout: Layout, lane: string, id: string) {
   return layout.positions.get(`${lane}/${id}`);
+}
+
+export function heightOf(layout: Layout, id: string) {
+  return layout.heights.get(id) ?? NODE_HEIGHT;
 }
 
 /**

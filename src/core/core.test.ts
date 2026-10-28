@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { diffModels } from "./diff";
-import { layoutModels, mergeLanes, positionOf } from "./layout";
+import { heightOf, layoutModels, mergeLanes, NODE_HEIGHT, positionOf } from "./layout";
 import type { FlowModel, Process } from "./model";
 import { insertBetween, moveProcess, removeProcess, updateProcess } from "./mutations";
 import { parseFlowYaml } from "./parse";
@@ -191,6 +191,16 @@ describe("layout", () => {
     expect(b.y).toBe(c.y);
     expect(b.x).not.toBe(c.x);
     expect(positionOf(layout, "l", "d")!.y).toBeGreaterThan(b.y);
+  });
+
+  it("grows rows to fit tall process boxes", async () => {
+    const m = chain(["a", "b", "c"]);
+    const layout = await layoutModels([m], (p) => (p.id === "b" ? 120 : 0));
+    const y = (id: string) => positionOf(layout, "l", id)!.y;
+    expect(heightOf(layout, "a")).toBe(NODE_HEIGHT);
+    expect(heightOf(layout, "b")).toBe(120);
+    expect(y("c") - y("b")).toBeGreaterThan(y("b") - y("a"));
+    expect(y("c") - (y("b") + 120)).toBe(y("b") - (y("a") + NODE_HEIGHT));
   });
 
   it("merges lane orders", () => {

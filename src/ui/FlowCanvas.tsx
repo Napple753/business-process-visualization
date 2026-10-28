@@ -10,13 +10,14 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ModelDiff } from "../core/diff";
 import { buildGraph } from "../core/graph";
-import { LANE_HEADER_HEIGHT, NODE_HEIGHT, NODE_WIDTH, positionOf, type Layout } from "../core/layout";
+import { heightOf, LANE_HEADER_HEIGHT, NODE_HEIGHT, NODE_WIDTH, positionOf, type Layout } from "../core/layout";
 import { flowKey, type FlowModel, type Lane, type Side } from "../core/model";
 import { connect, moveProcess, removeProcess, updateProcess } from "../core/mutations";
 import { assignDecisionPorts, type Port } from "../core/ports";
 import { useStore } from "../state/store";
 import type { FlowStatus } from "./diffStyle";
 import { FlowEdge, type FlowEdgeType } from "./edges/FlowEdge";
+import { LaneHeaders, type LaneHeader } from "./LaneHeaders";
 import { LaneNode, type LaneNodeType } from "./nodes/LaneNode";
 import { ProcessNode, type ProcessNodeType } from "./nodes/ProcessNode";
 
@@ -25,6 +26,8 @@ const edgeTypes = { flow: FlowEdge };
 const DROP_DISTANCE = 32;
 const FIT_OPTIONS = { padding: 0.06, maxZoom: 1 };
 const REVEAL_MARGIN = 24;
+/** How far past the swimlanes the viewport may scroll, in flow units. */
+const EXTENT_MARGIN = 48;
 
 /** Shared between the panes of one process screen. */
 export interface ViewportSync {
@@ -82,17 +85,27 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
     [apply, side],
   );
 
-  const nodes = useMemo(() => {
-    const height = layout.height + NODE_HEIGHT;
+  const laneHeight = layout.height + NODE_HEIGHT;
+  const headers = useMemo((): LaneHeader[] => {
     const laneNames = new Map([...otherLanes, ...model.lanes].map((l) => [l.id, l.name]));
+    return layout.lanes.map((col) => ({ ...col, name: laneNames.get(col.id) ?? col.id, ghost: !laneIds.has(col.id) }));
+  }, [layout, model, otherLanes, laneIds]);
+  const translateExtent = useMemo(
+    (): [[number, number], [number, number]] => [
+      [-EXTENT_MARGIN, -EXTENT_MARGIN],
+      [layout.width + EXTENT_MARGIN, laneHeight + EXTENT_MARGIN],
+    ],
+    [layout.width, laneHeight],
+  );
+
+  const nodes = useMemo(() => {
     const lanes: LaneNodeType[] = layout.lanes.map((col, i) => ({
       id: `lane:${col.id}`,
       type: "lane",
       position: { x: col.x, y: 0 },
       data: {
-        name: laneNames.get(col.id) ?? col.id,
         width: col.width,
-        height,
+        height: laneHeight,
         alt: i % 2 === 1,
         ghost: !laneIds.has(col.id),
         dropTarget: dropTarget?.kind === "lane" && dropTarget.lane === col.id,
@@ -121,6 +134,7 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
           selected: selection?.side === side && selection.kind === "process" && selection.id === p.id,
           data: {
             process: p,
+            height: heightOf(layout, p.id),
             kinds: kindsFor(p.id),
             editable: true,
             hasPredecessors: (graph.pred.get(p.id)?.length ?? 0) > 0,
@@ -139,14 +153,14 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
       ];
     });
     return [...lanes, ...processes];
-  }, [layout, model, otherLanes, laneIds, diff, side, drag, dropTarget, selection, graph, requestAdd, setPending, remove, apply, editingId]);
+  }, [layout, laneHeight, model, laneIds, diff, side, drag, dropTarget, selection, graph, requestAdd, setPending, remove, apply, editingId]);
 
   const ports = useMemo(
     () =>
       assignDecisionPorts(model, (id) => {
         const p = model.processes.find((q) => q.id === id);
         const pos = p && positionOf(layout, p.lane, p.id);
-        return pos && { x: pos.x + NODE_WIDTH / 2, y: pos.y + NODE_HEIGHT / 2 };
+        return pos && { x: pos.x + NODE_WIDTH / 2, y: pos.y + heightOf(layout, id) / 2 };
       }),
     [model, layout],
   );
@@ -189,7 +203,7 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
 
   const findDropTarget = (id: string, x: number, y: number): DropTarget => {
     const cx = x + NODE_WIDTH / 2;
-    const cy = y + NODE_HEIGHT / 2;
+    const cy = y + heightOf(layout, id) / 2;
     let best: DropTarget = null;
     let bestDistance = DROP_DISTANCE;
     for (const f of model.flows) {
@@ -198,7 +212,7 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
       const b = processPosition(f.to);
       if (!a || !b) continue;
       const port = ports.get(flowKey(f)) ?? "bottom";
-      const [sx, sy] = exitPoint(a, port);
+      const [sx, sy] = exitPoint(a, heightOf(layout, f.from), port);
       const d = distanceToFlow(cx, cy, sx, sy, b.x + NODE_WIDTH / 2, b.y, port);
       if (d < bestDistance) {
         bestDistance = d;
@@ -290,7 +304,9 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
       return 0;
     };
     const dx = shift(pos.x * zoom + x, (pos.x + NODE_WIDTH) * zoom + x, el.clientWidth);
-    const dy = shift(pos.y * zoom + y, (pos.y + NODE_HEIGHT) * zoom + y, el.clientHeight);
+    // Keep the box clear of the sticky lane headers.
+    const top = LANE_HEADER_HEIGHT * zoom;
+    const dy = shift(pos.y * zoom + y - top, (pos.y + heightOf(layout, sel.id)) * zoom + y - top, el.clientHeight - top);
     return dx || dy ? { x: x + dx, y: y + dy, zoom } : null;
   };
 
@@ -335,8 +351,12 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
           setPending(null);
         }}
         onMove={onMove}
-        // Double click renames a process; zooming is left to the wheel and controls.
+        // The wheel scrolls; Ctrl/Cmd + wheel (or a pinch) zooms. Double click renames a process.
+        panOnScroll
+        panOnScrollSpeed={1}
+        zoomActivationKeyCode={["Meta", "Control"]}
         zoomOnDoubleClick={false}
+        translateExtent={translateExtent}
         nodesConnectable={false}
         edgesFocusable={false}
         deleteKeyCode={null}
@@ -347,16 +367,17 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={24} size={1} />
+        <LaneHeaders lanes={headers} />
         <Controls showInteractive={false} />
       </ReactFlow>
     </>
   );
 }
 
-function exitPoint(box: { x: number; y: number }, port: Port): [number, number] {
-  if (port === "left") return [box.x, box.y + NODE_HEIGHT / 2];
-  if (port === "right") return [box.x + NODE_WIDTH, box.y + NODE_HEIGHT / 2];
-  return [box.x + NODE_WIDTH / 2, box.y + NODE_HEIGHT];
+function exitPoint(box: { x: number; y: number }, height: number, port: Port): [number, number] {
+  if (port === "left") return [box.x, box.y + height / 2];
+  if (port === "right") return [box.x + NODE_WIDTH, box.y + height / 2];
+  return [box.x + NODE_WIDTH / 2, box.y + height];
 }
 
 /**

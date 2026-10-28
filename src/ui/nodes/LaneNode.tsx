@@ -1,7 +1,6 @@
 import type { Node, NodeProps } from "@xyflow/react";
 
 export type LaneNodeData = {
-  name: string;
   width: number;
   height: number;
   alt: boolean;
@@ -12,11 +11,8 @@ export type LaneNodeData = {
 
 export type LaneNodeType = Node<LaneNodeData, "lane">;
 
+/** Lane background; its title is drawn by LaneHeaders so that it can stay in view. */
 export function LaneNode({ data }: NodeProps<LaneNodeType>) {
   const classes = ["lane-node", data.alt && "alt", data.ghost && "ghost", data.dropTarget && "drop-target"];
-  return (
-    <div className={classes.filter(Boolean).join(" ")} style={{ width: data.width, height: data.height }}>
-      <div className="lane-title">{data.name}</div>
-    </div>
-  );
+  return <div className={classes.filter(Boolean).join(" ")} style={{ width: data.width, height: data.height }} />;
 }

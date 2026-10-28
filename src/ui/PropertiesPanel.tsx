@@ -54,7 +54,7 @@ export function PropertiesPanel({ models, diff, issues, view }: Props) {
               Hover a connector and click <b>+</b> to insert a process. Double-click a process to rename it. Select a
               process for branch, merge and delete
               actions. Drag a process onto another connector to move it there, or into another swimlane to change its
-              lane. Ctrl/Cmd+S saves, Ctrl/Cmd+Z undoes.
+              lane. Scroll to pan, Ctrl/Cmd+scroll to zoom. Ctrl/Cmd+S saves, Ctrl/Cmd+Z undoes.
             </p>
           </section>
         </>

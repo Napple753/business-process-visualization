@@ -6,6 +6,8 @@ import { CHANGE_COLORS, CHANGE_LABELS, CHANGE_PRIORITY } from "../diffStyle";
 
 export type ProcessNodeData = {
   process: Process;
+  /** Box height from the layout; grows with long names. */
+  height: number;
   kinds: ChangeKind[];
   editable: boolean;
   hasPredecessors: boolean;
@@ -33,11 +35,12 @@ export function ProcessNode({ data, selected }: NodeProps<ProcessNodeType>) {
     kinds.includes("removed") && "removed",
   ];
   const meta = [...(process.systems ?? []), ...(process.documents ?? [])].join(", ");
+  const style = { height: data.height, ...(main && { "--diff-color": CHANGE_COLORS[main] }) } as React.CSSProperties;
 
   return (
     <div
       className={classes.filter(Boolean).join(" ")}
-      style={main ? ({ "--diff-color": CHANGE_COLORS[main] } as React.CSSProperties) : undefined}
+      style={style}
       title={process.description ? `${process.name}\n\n${process.description}` : process.name}
     >
       <Handle type="target" position={Position.Top} isConnectable={false} />
