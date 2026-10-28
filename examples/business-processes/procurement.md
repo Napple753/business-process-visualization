@@ -8,4 +8,4 @@ Purchasing of materials from suppliers.
 - Warehouse
 
 ## Notes
-- To-Be has not been designed yet.
+- Documented as a single flow; no improvement is planned yet.

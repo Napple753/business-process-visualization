@@ -5,13 +5,22 @@ import { baseName, joinPath, type FileSystem } from "./fs";
 
 export const WORKSPACE_DIR = "business-processes";
 
-export const FILE_NAMES: Record<Side, string> = { asis: "asis.yaml", tobe: "tobe.yaml" };
+// A process is a set of files sharing one name: `<name>.yaml` is its flow (the As-Is
+// while a To-Be exists), `<name>.tobe.yaml` the planned flow and `<name>.md` the notes.
+const SUFFIXES: Record<Side, string> = { asis: ".yaml", tobe: ".tobe.yaml" };
+const README_SUFFIX = ".md";
+
+export function flowFileName(name: string, side: Side): string {
+  return name + SUFFIXES[side];
+}
 
 export interface ProcessEntry {
-  /** Folder name; also the process identifier. */
-  folder: string;
-  path: string;
+  /** Path from the workspace root without suffix, e.g. "sales/order"; also the process identifier. */
+  id: string;
   title: string;
+  /** Where each side's file lives, whether or not it exists. */
+  paths: Record<Side, string>;
+  readme: string;
   hasAsis: boolean;
   hasTobe: boolean;
   issues: Record<Side, Issue[]>;
@@ -24,54 +33,92 @@ export async function resolveWorkspaceRoot(fs: FileSystem, selected: string): Pr
   return (await fs.exists(nested)) ? nested : null;
 }
 
+/** Collects processes from the root and its subfolders, which serve as categories. */
 export async function scanWorkspace(fs: FileSystem, root: string): Promise<ProcessEntry[]> {
-  const dirs = (await fs.readDir(root)).filter((e) => e.isDirectory && !e.name.startsWith("."));
-  const entries = await Promise.all(dirs.map((d) => readEntry(fs, joinPath(root, d.name))));
-  return entries.sort((a, b) => a.folder.localeCompare(b.folder));
+  const found = new Map<string, { dir: string; name: string; sides: Set<Side> }>();
+  const walk = async (dir: string, prefix: string) => {
+    for (const e of await fs.readDir(dir)) {
+      if (e.name.startsWith(".")) continue;
+      if (e.isDirectory) {
+        await walk(joinPath(dir, e.name), `${prefix}${e.name}/`);
+        continue;
+      }
+      const side = sideOf(e.name);
+      if (!side) continue;
+      const name = e.name.slice(0, -SUFFIXES[side].length);
+      const id = prefix + name;
+      const item = found.get(id) ?? { dir, name, sides: new Set<Side>() };
+      item.sides.add(side);
+      found.set(id, item);
+    }
+  };
+  await walk(root, "");
+  const entries = await Promise.all(
+    [...found].map(([id, { dir, name, sides }]) => readEntry(fs, id, dir, name, sides)),
+  );
+  return entries.sort((a, b) => a.id.localeCompare(b.id));
 }
 
-async function readEntry(fs: FileSystem, path: string): Promise<ProcessEntry> {
-  const folder = baseName(path);
+function sideOf(fileName: string): Side | null {
+  if (fileName.endsWith(SUFFIXES.tobe)) return fileName.length > SUFFIXES.tobe.length ? "tobe" : null;
+  if (fileName.endsWith(SUFFIXES.asis)) return fileName.length > SUFFIXES.asis.length ? "asis" : null;
+  return null;
+}
+
+async function readEntry(fs: FileSystem, id: string, dir: string, name: string, sides: Set<Side>): Promise<ProcessEntry> {
+  const paths = entryPaths(dir, name);
   const issues: Record<Side, Issue[]> = { asis: [], tobe: [] };
-  const presence: Record<Side, boolean> = { asis: false, tobe: false };
-  for (const side of ["asis", "tobe"] as const) {
-    const file = joinPath(path, FILE_NAMES[side]);
-    if (!(await fs.exists(file))) continue;
-    presence[side] = true;
-    const { model, errors } = parseFlowYaml(await fs.readText(file));
+  for (const side of sides) {
+    const { model, errors } = parseFlowYaml(await fs.readText(paths[side]));
     issues[side] = model
       ? validateModel(model)
       : errors.map((message): Issue => ({ severity: "error", message }));
   }
+  const readme = joinPath(dir, name + README_SUFFIX);
   return {
-    folder,
-    path,
-    title: await readTitle(fs, path, folder),
-    hasAsis: presence.asis,
-    hasTobe: presence.tobe,
+    id,
+    title: await readTitle(fs, readme, name),
+    paths,
+    readme,
+    hasAsis: sides.has("asis"),
+    hasTobe: sides.has("tobe"),
     issues,
   };
 }
 
-async function readTitle(fs: FileSystem, path: string, fallback: string): Promise<string> {
-  const readme = joinPath(path, "README.md");
+function entryPaths(dir: string, name: string): Record<Side, string> {
+  return { asis: joinPath(dir, flowFileName(name, "asis")), tobe: joinPath(dir, flowFileName(name, "tobe")) };
+}
+
+async function readTitle(fs: FileSystem, readme: string, fallback: string): Promise<string> {
   if (!(await fs.exists(readme))) return fallback;
   const heading = (await fs.readText(readme)).match(/^#\s+(.+)$/m);
   return heading ? heading[1].trim() : fallback;
 }
 
-export async function createProcessFolder(fs: FileSystem, root: string, folder: string, title: string) {
-  const path = joinPath(root, folder);
-  if (await fs.exists(path)) throw new Error(`"${folder}" already exists.`);
-  await fs.mkdir(path);
-  await fs.writeText(joinPath(path, "README.md"), readmeTemplate(title));
-  await fs.writeText(joinPath(path, FILE_NAMES.asis), FLOW_TEMPLATE);
+export async function createProcess(fs: FileSystem, root: string, name: string, title: string) {
+  const paths = entryPaths(root, name);
+  const readme = joinPath(root, name + README_SUFFIX);
+  for (const path of [paths.asis, paths.tobe, readme]) {
+    if (await fs.exists(path)) throw new Error(`"${baseName(path)}" already exists.`);
+  }
+  await fs.writeText(readme, readmeTemplate(title));
+  await fs.writeText(paths.asis, FLOW_TEMPLATE);
 }
 
-export async function copyAsisToTobe(fs: FileSystem, entry: ProcessEntry) {
-  const target = joinPath(entry.path, FILE_NAMES.tobe);
-  if (await fs.exists(target)) throw new Error("To-Be already exists.");
-  await fs.writeText(target, await fs.readText(joinPath(entry.path, FILE_NAMES.asis)));
+export async function createTobe(fs: FileSystem, entry: ProcessEntry) {
+  if (await fs.exists(entry.paths.tobe)) throw new Error("To-Be already exists.");
+  await fs.writeText(entry.paths.tobe, await fs.readText(entry.paths.asis));
+}
+
+/** Makes the To-Be the process's flow, so the commit shows the change on one file. */
+export async function adoptTobe(fs: FileSystem, entry: ProcessEntry) {
+  await fs.writeText(entry.paths.asis, await fs.readText(entry.paths.tobe));
+  await fs.remove(entry.paths.tobe);
+}
+
+export async function discardTobe(fs: FileSystem, entry: ProcessEntry) {
+  await fs.remove(entry.paths.tobe);
 }
 
 function readmeTemplate(title: string): string {

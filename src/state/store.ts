@@ -4,11 +4,12 @@ import type { FlowModel, Side } from "../core/model";
 import type { MutationResult } from "../core/mutations";
 import { parseFlowYaml } from "../core/parse";
 import { serializeFlowYaml } from "../core/serialize";
-import { getFileSystem, joinPath, type FileSystem } from "../io/fs";
+import { baseName, getFileSystem, type FileSystem } from "../io/fs";
 import {
-  copyAsisToTobe,
-  createProcessFolder,
-  FILE_NAMES,
+  adoptTobe,
+  createProcess,
+  createTobe,
+  discardTobe,
   resolveWorkspaceRoot,
   scanWorkspace,
   type ProcessEntry,
@@ -75,9 +76,12 @@ interface AppState {
   openFolder(): Promise<void>;
   closeFolder(): Promise<void>;
   refreshEntries(): Promise<void>;
-  createProcess(folder: string, title: string): Promise<void>;
+  createProcess(name: string, title: string): Promise<void>;
   createTobe(entry: ProcessEntry): Promise<void>;
-  openProcess(folder: string): Promise<void>;
+  /** Replaces the flow of the open process with its To-Be. */
+  adoptTobe(): Promise<void>;
+  discardTobe(): Promise<void>;
+  openProcess(id: string): Promise<void>;
   closeProcess(): void;
   setView(view: ViewMode): void;
   select(selection: Selection): void;
@@ -143,29 +147,43 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  async createProcess(folder, title) {
+  async createProcess(name, title) {
     const { fs, root } = get();
-    await createProcessFolder(fs!, root!, folder, title);
+    await createProcess(fs!, root!, name, title);
     await get().refreshEntries();
   },
 
   async createTobe(entry) {
-    await copyAsisToTobe(get().fs!, entry);
-    await get().refreshEntries();
-    const current = get().current;
-    if (current?.entry.folder === entry.folder) await get().openProcess(entry.folder);
+    await createTobe(get().fs!, entry);
+    await reopenIfCurrent(entry.id);
   },
 
-  async openProcess(folder) {
+  async adoptTobe() {
+    const { fs, current } = get();
+    if (!fs || !current?.sides.tobe || !(await confirmTobeChange(fs, current, "adopt"))) return;
+    await adoptTobe(fs, current.entry);
+    await reopenIfCurrent(current.entry.id);
+    get().notify({ level: "info", text: `To-Be adopted as ${baseName(current.entry.paths.asis)}.` });
+  },
+
+  async discardTobe() {
+    const { fs, current } = get();
+    if (!fs || !current?.sides.tobe || !(await confirmTobeChange(fs, current, "discard"))) return;
+    await discardTobe(fs, current.entry);
+    await reopenIfCurrent(current.entry.id);
+    get().notify({ level: "info", text: "To-Be discarded." });
+  },
+
+  async openProcess(id) {
     const { fs, entries } = get();
-    const entry = entries.find((e) => e.folder === folder);
+    const entry = entries.find((e) => e.id === id);
     if (!fs || !entry) return;
     const sides: Partial<Record<Side, SideState>> = {};
     for (const side of ["asis", "tobe"] as const) {
-      const path = joinPath(entry.path, FILE_NAMES[side]);
+      const path = entry.paths[side];
       if (await fs.exists(path)) sides[side] = loadSide(path, await fs.readText(path));
     }
-    const view: ViewMode = sides.asis && sides.tobe ? "compare" : sides.tobe ? "tobe" : "asis";
+    const view = defaultView(sides);
     set({ current: { entry, sides }, view, selection: null, pending: null, activeSide: view === "asis" ? "asis" : "tobe" });
   },
 
@@ -280,27 +298,27 @@ export const useStore = create<AppState>((set, get) => ({
     const { fs, current } = get();
     if (!fs || !current) return;
     const touched = (p: string) => paths.some((changed) => normalize(changed) === normalize(p));
-    const entryTouched = paths.some((p) => normalize(p).startsWith(normalize(current.entry.path)));
-    if (!entryTouched) return;
+    const { entry } = current;
+    if (![entry.paths.asis, entry.paths.tobe, entry.readme].some(touched)) return;
 
-    // A side may have been created (e.g. To-Be added by git pull).
-    const latest = get().entries.find((e) => e.folder === current.entry.folder);
+    const latest = get().entries.find((e) => e.id === entry.id);
     if (!latest) {
       get().notify({ level: "warning", text: "This process was removed on disk." });
       return;
     }
+    useStore.setState({ current: { ...get().current!, entry: latest } });
     for (const side of ["asis", "tobe"] as const) {
       const state = current.sides[side];
-      const path = joinPath(latest.path, FILE_NAMES[side]);
+      const path = entry.paths[side];
+      // A side may have been created or removed, e.g. a To-Be added or adopted by git pull.
       if (!state) {
-        if (await fs.exists(path)) {
-          setSide(side, loadSide(path, await fs.readText(path)));
-        }
+        if (await fs.exists(path)) setSide(side, loadSide(path, await fs.readText(path)));
         continue;
       }
       if (!touched(state.path)) continue;
       if (!(await fs.exists(state.path))) {
-        get().notify({ level: "warning", text: `${FILE_NAMES[side]} was deleted on disk.` });
+        if (state.dirty) get().notify({ level: "warning", text: `${baseName(state.path)} was deleted on disk.` });
+        else removeSide(side);
         continue;
       }
       const text = await fs.readText(state.path);
@@ -330,6 +348,32 @@ function loadSide(path: string, text: string): SideState {
   return { path, diskText: text, doc, model, errors, past: [], future: [], dirty: false, conflict: false };
 }
 
+async function reopenIfCurrent(id: string) {
+  await useStore.getState().refreshEntries();
+  if (useStore.getState().current?.entry.id === id) await useStore.getState().openProcess(id);
+}
+
+async function confirmTobeChange(
+  fs: FileSystem,
+  current: NonNullable<AppState["current"]>,
+  action: "adopt" | "discard",
+): Promise<boolean> {
+  if (current.sides.asis?.dirty || current.sides.tobe?.dirty) {
+    useStore.getState().notify({ level: "warning", text: "Save or undo your changes first." });
+    return false;
+  }
+  const { paths } = current.entry;
+  return fs.confirm(
+    action === "adopt"
+      ? `Replace ${baseName(paths.asis)} with the To-Be and delete ${baseName(paths.tobe)}?`
+      : `Delete ${baseName(paths.tobe)}?`,
+  );
+}
+
+function defaultView(sides: Partial<Record<Side, SideState>>): ViewMode {
+  return sides.asis && sides.tobe ? "compare" : sides.tobe ? "tobe" : "asis";
+}
+
 function updateSide(side: Side, patch: Partial<SideState>) {
   const current = useStore.getState().current;
   const state = current?.sides[side];
@@ -341,6 +385,21 @@ function setSide(side: Side, state: SideState) {
   const current = useStore.getState().current;
   if (!current) return;
   useStore.setState({ current: { ...current, sides: { ...current.sides, [side]: state } } });
+}
+
+function removeSide(side: Side) {
+  const { current, selection, pending, view } = useStore.getState();
+  if (!current) return;
+  const sides = { ...current.sides };
+  delete sides[side];
+  const nextView = view === "compare" || view === side ? defaultView(sides) : view;
+  useStore.setState({
+    current: { ...current, sides },
+    view: nextView,
+    ...(nextView !== "compare" && { activeSide: nextView }),
+    selection: selection?.side === side ? null : selection,
+    pending: pending?.side === side ? null : pending,
+  });
 }
 
 function dropStaleSelection(side: Side, model: FlowModel) {

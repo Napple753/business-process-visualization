@@ -1,5 +1,5 @@
 import { ask, open } from "@tauri-apps/plugin-dialog";
-import { exists, mkdir, readDir, readTextFile, watch, writeTextFile } from "@tauri-apps/plugin-fs";
+import { exists, mkdir, readDir, readTextFile, remove, watch, writeTextFile } from "@tauri-apps/plugin-fs";
 import { load } from "@tauri-apps/plugin-store";
 import type { FileSystem } from "./fs";
 
@@ -19,6 +19,7 @@ export function createTauriFs(): FileSystem {
     writeText: (path, text) => writeTextFile(path, text),
     exists: (path) => exists(path),
     mkdir: (path) => mkdir(path, { recursive: true }),
+    remove: (path) => remove(path),
     async watch(path, onChange) {
       return watch(path, (event) => onChange(event.paths), { recursive: true, delayMs: 300 });
     },

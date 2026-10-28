@@ -5,8 +5,8 @@ It replaces spreadsheet-based flow charts: Git is the single source of truth, th
 YAML files are the data, and this app is only an editing aid. It is distributed as a
 standalone executable and is never added to the repositories it edits.
 
-- Lists every process in a `business-processes/` folder, with As-Is / To-Be presence and validation results
-- Shows As-Is and To-Be side by side; the same process is drawn at the same height on both sides
+- Lists every process in a `business-processes/` folder, with its flows and validation results
+- Edits a single flow, or an As-Is and To-Be side by side; the same process is drawn at the same height on both sides
 - Highlights differences: Added, Removed, Renamed, Moved, Lane changed, Modified, plus new and removed connectors
 - Edits without manual wiring: insert on a connector, branch, merge, delete, drag to move, change swimlane
 - Saves to YAML with minimal diffs (comments and key order are preserved) and reloads on external changes
@@ -33,16 +33,31 @@ standalone executable and is never added to the repositories it edits.
 
 ```text
 business-processes/
-├─ sales-order/
-│   ├─ README.md     # for humans: overview, departments, related processes, notes
-│   ├─ asis.yaml     # current flow
-│   └─ tobe.yaml     # target flow
-└─ procurement/
-    ├─ README.md
-    └─ asis.yaml
+├─ sales-order.md          # for humans: overview, departments, related processes, notes
+├─ sales-order.yaml        # the flow; called As-Is while a To-Be exists
+├─ sales-order.tobe.yaml   # planned flow (optional)
+├─ procurement.md
+├─ procurement.yaml        # a single flow
+└─ logistics/              # subfolders group processes; the ID becomes "logistics/returns"
+    └─ returns.yaml
 ```
 
-The first `# Heading` of `README.md` is shown as the process title.
+A process is the set of files sharing one name. `<name>.yaml` is its flow, and
+`<name>.tobe.yaml` the planned change to it; when both exist they are compared. A process
+that does not exist yet can be designed as a To-Be only.
+
+| Situation | Files | Shown as |
+| --- | --- | --- |
+| Documented flow | `x.yaml` | Flow |
+| Planning a change | `x.yaml` + `x.tobe.yaml` | As-Is / To-Be comparison |
+| New process | `x.tobe.yaml` | To-Be |
+
+**Create To-Be** copies the flow to `x.tobe.yaml`. When the change goes live,
+**Adopt To-Be** overwrites `x.yaml` with it and deletes `x.tobe.yaml`, so the commit shows
+the change as a diff of one file and `git log x.yaml` holds the whole history of the
+process. **Discard To-Be** deletes `x.tobe.yaml`.
+
+The first `# Heading` of `<name>.md` is shown as the process title.
 
 ```yaml
 version: 1

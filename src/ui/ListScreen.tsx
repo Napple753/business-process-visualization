@@ -5,6 +5,7 @@ import type { ProcessEntry } from "../io/workspace";
 import { useStore } from "../state/store";
 import { NoticeBar } from "./App";
 import { Dialog } from "./Dialog";
+import { sideName } from "./sideName";
 
 export function ListScreen() {
   const root = useStore((s) => s.root);
@@ -34,36 +35,32 @@ export function ListScreen() {
           <thead>
             <tr>
               <th>Process</th>
-              <th>As-Is</th>
-              <th>To-Be</th>
+              <th>Flows</th>
               <th>Validation</th>
             </tr>
           </thead>
           <tbody>
             {entries.length === 0 && (
               <tr>
-                <td colSpan={4} className="muted">
+                <td colSpan={3} className="muted">
                   No processes yet. Create one with “New process”.
                 </td>
               </tr>
             )}
             {entries.map((entry) => (
-              <tr key={entry.folder} className="row" onClick={() => void openProcess(entry.folder)}>
+              <tr key={entry.id} className="row" onClick={() => void openProcess(entry.id)}>
                 <td>
                   <div className="title">{entry.title}</div>
-                  <div className="muted mono">{entry.folder}/</div>
+                  <div className="muted mono">{entry.id}</div>
                 </td>
                 <td>
-                  <Presence present={entry.hasAsis} />
-                </td>
-                <td>
-                  <TobeCell entry={entry} />
+                  <FlowsCell entry={entry} />
                 </td>
                 <td onClick={(e) => e.stopPropagation()}>
                   <IssueCell
                     entry={entry}
-                    expanded={expanded === entry.folder}
-                    onToggle={() => setExpanded(expanded === entry.folder ? null : entry.folder)}
+                    expanded={expanded === entry.id}
+                    onToggle={() => setExpanded(expanded === entry.id ? null : entry.id)}
                   />
                 </td>
               </tr>
@@ -71,36 +68,37 @@ export function ListScreen() {
           </tbody>
         </table>
       </main>
-      {creating && <NewProcessDialog existing={entries.map((e) => e.folder)} onClose={() => setCreating(false)} />}
+      {creating && <NewProcessDialog existing={entries.map((e) => e.id)} onClose={() => setCreating(false)} />}
     </>
   );
 }
 
-function Presence({ present }: { present: boolean }) {
-  return <span className={`badge ${present ? "yes" : "no"}`}>{present ? "Yes" : "None"}</span>;
-}
-
-function TobeCell({ entry }: { entry: ProcessEntry }) {
+function FlowsCell({ entry }: { entry: ProcessEntry }) {
   const createTobe = useStore((s) => s.createTobe);
   const notify = useStore((s) => s.notify);
-  if (entry.hasTobe || !entry.hasAsis) return <Presence present={entry.hasTobe} />;
   return (
-    <button
-      className="small"
-      onClick={(e) => {
-        e.stopPropagation();
-        createTobe(entry).catch((err) => notify({ level: "error", text: String(err) }));
-      }}
-    >
-      Create from As-Is
-    </button>
+    <div className="flows-cell">
+      {entry.hasAsis && <span className="badge yes">{sideName("asis", entry.hasTobe)}</span>}
+      {entry.hasTobe && <span className="badge yes">To-Be</span>}
+      {entry.hasAsis && !entry.hasTobe && (
+        <button
+          className="small"
+          onClick={(e) => {
+            e.stopPropagation();
+            createTobe(entry).catch((err) => notify({ level: "error", text: String(err) }));
+          }}
+        >
+          Create To-Be
+        </button>
+      )}
+    </div>
   );
 }
 
 function IssueCell({ entry, expanded, onToggle }: { entry: ProcessEntry; expanded: boolean; onToggle: () => void }) {
   const all: (Issue & { side: string })[] = [
-    ...entry.issues.asis.map((i) => ({ ...i, side: "As-Is" })),
-    ...entry.issues.tobe.map((i) => ({ ...i, side: "To-Be" })),
+    ...entry.issues.asis.map((i) => ({ ...i, side: sideName("asis", entry.hasTobe) })),
+    ...entry.issues.tobe.map((i) => ({ ...i, side: sideName("tobe", entry.hasTobe) })),
   ];
   const errors = all.filter((i) => i.severity === "error").length;
   const warnings = all.length - errors;
@@ -128,18 +126,18 @@ function NewProcessDialog({ existing, onClose }: { existing: string[]; onClose: 
   const createProcess = useStore((s) => s.createProcess);
   const openProcess = useStore((s) => s.openProcess);
   const [title, setTitle] = useState("");
-  const [folder, setFolder] = useState("");
-  const [folderEdited, setFolderEdited] = useState(false);
+  const [name, setName] = useState("");
+  const [nameEdited, setNameEdited] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const effectiveFolder = folderEdited ? folder : slugify(title);
-  const problem = idProblem(effectiveFolder, existing);
+  const effectiveName = nameEdited ? name : slugify(title);
+  const problem = idProblem(effectiveName, existing);
 
   const submit = async () => {
     if (problem || !title.trim()) return;
     try {
-      await createProcess(effectiveFolder, title.trim());
+      await createProcess(effectiveName, title.trim());
       onClose();
-      await openProcess(effectiveFolder);
+      await openProcess(effectiveName);
     } catch (e) {
       setError(String(e));
     }
@@ -152,20 +150,20 @@ function NewProcessDialog({ existing, onClose }: { existing: string[]; onClose: 
         <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Sales Order" />
       </label>
       <label className="field">
-        <span>Folder (permanent ID)</span>
+        <span>File name (permanent ID)</span>
         <input
           className="mono"
-          value={effectiveFolder}
+          value={effectiveName}
           onChange={(e) => {
-            setFolder(e.target.value);
-            setFolderEdited(true);
+            setName(e.target.value);
+            setNameEdited(true);
           }}
           placeholder="sales-order"
         />
         {title && problem && <span className="field-error">{problem}</span>}
       </label>
       <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-        Creates README.md and asis.yaml. A To-Be flow can be created from the As-Is later.
+        Creates {effectiveName || "name"}.yaml and {effectiveName || "name"}.md. A To-Be can be created from the flow later.
       </p>
       {error && <span className="field-error">{error}</span>}
       <div className="actions">

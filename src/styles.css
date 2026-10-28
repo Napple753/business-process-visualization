@@ -328,6 +328,12 @@ button.toggle.active {
   color: var(--muted);
 }
 
+.flows-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .issue-summary {
   display: flex;
   gap: 8px;
@@ -428,6 +434,11 @@ button.toggle.active {
   border-bottom: 1px solid var(--border);
   font-weight: 600;
   font-size: 13px;
+}
+
+.pane-header .mono {
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .pane-header .dirty {

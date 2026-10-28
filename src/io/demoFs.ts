@@ -48,6 +48,9 @@ export function createDemoFs(): FileSystem {
     async mkdir(path) {
       dirs.add(path);
     },
+    async remove(path) {
+      files.delete(path);
+    },
     async watch() {
       return () => {};
     },

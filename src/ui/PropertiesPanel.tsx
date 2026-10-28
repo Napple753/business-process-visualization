@@ -15,8 +15,7 @@ import { uniqueSlug } from "../core/slug";
 import type { Issue } from "../core/validate";
 import { useStore, type ViewMode } from "../state/store";
 import { CHANGE_COLORS, CHANGE_LABELS, CHANGE_PRIORITY, FLOW_COLORS } from "./diffStyle";
-
-const SIDE_NAMES: Record<Side, string> = { asis: "As-Is", tobe: "To-Be" };
+import { useSideName } from "./sideName";
 
 interface Props {
   models: Partial<Record<Side, FlowModel>>;
@@ -79,6 +78,7 @@ function ProcessProperties({
   diff: ModelDiff | null;
 }) {
   const apply = useStore((s) => s.apply);
+  const sideName = useSideName();
   const update = (patch: Partial<Omit<Process, "id">>) => apply(side, (m) => updateProcess(m, process.id, patch));
   const otherSide: Side = side === "asis" ? "tobe" : "asis";
   const other = models[otherSide]?.processes.find((p) => p.id === process.id);
@@ -86,7 +86,7 @@ function ProcessProperties({
 
   return (
     <section>
-      <h3>Process · {SIDE_NAMES[side]}</h3>
+      <h3>Process · {sideName(side)}</h3>
       <label className="field">
         <span>ID</span>
         <input className="mono" value={process.id} readOnly />
@@ -221,10 +221,11 @@ function FlowProperties({
   label?: string;
 }) {
   const apply = useStore((s) => s.apply);
+  const sideName = useSideName();
   const name = (id: string) => model.processes.find((p) => p.id === id)?.name ?? id;
   return (
     <section>
-      <h3>Connector · {SIDE_NAMES[side]}</h3>
+      <h3>Connector · {sideName(side)}</h3>
       <div>
         {name(from)} → {name(to)}
       </div>
@@ -243,6 +244,7 @@ function FlowProperties({
 
 function LaneEditor({ side, model }: { side: Side; model: FlowModel }) {
   const apply = useStore((s) => s.apply);
+  const sideName = useSideName();
   const [newLane, setNewLane] = useState("");
   const add = () => {
     const name = newLane.trim();
@@ -253,7 +255,7 @@ function LaneEditor({ side, model }: { side: Side; model: FlowModel }) {
   };
   return (
     <section>
-      <h3>Swimlanes · {SIDE_NAMES[side]}</h3>
+      <h3>Swimlanes · {sideName(side)}</h3>
       {model.lanes.map((lane, i) => (
         <div key={lane.id} className="lane-row">
           <CommitInput
@@ -316,6 +318,7 @@ function Legend() {
 
 function IssueSection({ issues }: { issues: Partial<Record<Side, Issue[]>> }) {
   const select = useStore((s) => s.select);
+  const sideName = useSideName();
   const all = (["asis", "tobe"] as const).flatMap((side) => (issues[side] ?? []).map((i) => ({ ...i, side })));
   return (
     <section>
@@ -328,10 +331,10 @@ function IssueSection({ issues }: { issues: Partial<Record<Side, Issue[]>> }) {
             <li key={i} className={issue.severity}>
               {issue.target ? (
                 <a href="#" onClick={(e) => (e.preventDefault(), select({ side: issue.side, kind: "process", id: issue.target! }))}>
-                  {SIDE_NAMES[issue.side]}: {issue.message}
+                  {sideName(issue.side)}: {issue.message}
                 </a>
               ) : (
-                `${SIDE_NAMES[issue.side]}: ${issue.message}`
+                `${sideName(issue.side)}: ${issue.message}`
               )}
             </li>
           ))}

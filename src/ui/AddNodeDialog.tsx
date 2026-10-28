@@ -4,8 +4,7 @@ import { addLane, addPredecessor, addProcess, addSuccessor, insertBetween } from
 import { idProblem, slugify, uniqueSlug } from "../core/slug";
 import { useStore, type AddRequest } from "../state/store";
 import { Dialog } from "./Dialog";
-
-const SIDE_NAMES = { asis: "As-Is", tobe: "To-Be" } as const;
+import { useSideName } from "./sideName";
 
 export function AddNodeDialog({
   request,
@@ -17,6 +16,7 @@ export function AddNodeDialog({
   otherModel: FlowModel | null;
 }) {
   const { apply, requestAdd, select } = useStore.getState();
+  const sideName = useSideName();
   const taken = model.processes.map((p) => p.id);
   // Processes of the other side that are missing here can be reused with the same id,
   // which keeps them aligned and matched in the comparison.
@@ -67,10 +67,10 @@ export function AddNodeDialog({
   };
 
   return (
-    <Dialog title={`Add process to ${SIDE_NAMES[request.side]}`} onClose={() => requestAdd(null)} onSubmit={submit}>
+    <Dialog title={`Add process to ${sideName(request.side)}`} onClose={() => requestAdd(null)} onSubmit={submit}>
       {reusable.length > 0 && (
         <label className="field">
-          <span>Reuse from {request.side === "asis" ? "To-Be" : "As-Is"} (keeps the same ID)</span>
+          <span>Reuse from {sideName(request.side === "asis" ? "tobe" : "asis")} (keeps the same ID)</span>
           <select value="" onChange={(e) => reuse(e.target.value)}>
             <option value="">— New process —</option>
             {reusable.map((p) => (

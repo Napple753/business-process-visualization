@@ -5,22 +5,24 @@ import { layoutModels, type Layout } from "../core/layout";
 import type { FlowModel, Side } from "../core/model";
 import { disconnect, removeProcess } from "../core/mutations";
 import { validateModel } from "../core/validate";
+import { baseName } from "../io/fs";
 import { useStore, type SideState, type ViewMode } from "../state/store";
 import { AddNodeDialog } from "./AddNodeDialog";
 import { NoticeBar } from "./App";
 import { FlowCanvas, pushViewport, sameViewport, type ViewportSync } from "./FlowCanvas";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { measureProcessHeight } from "./measure";
-
-const SIDE_NAMES: Record<Side, string> = { asis: "As-Is", tobe: "To-Be" };
+import { useSideName } from "./sideName";
 
 export function ProcessScreen() {
   const current = useStore((s) => s.current)!;
   const view = useStore((s) => s.view);
   const addRequest = useStore((s) => s.addRequest);
   const fs = useStore((s) => s.fs)!;
-  const { closeProcess, setView, save, undo, redo, createTobe, notify } = useStore.getState();
+  const { closeProcess, setView, save, undo, redo, createTobe, adoptTobe, discardTobe, notify } = useStore.getState();
   const { asis, tobe } = current.sides;
+  const sideName = useSideName();
+  const report = (e: unknown) => notify({ level: "error", text: String(e) });
 
   const models = useMemo(() => {
     const m: Partial<Record<Side, FlowModel>> = {};
@@ -101,9 +103,9 @@ export function ProcessScreen() {
           ← Processes
         </button>
         <h1>{current.entry.title}</h1>
-        <span className="muted mono">{current.entry.folder}/</span>
+        <span className="muted mono">{current.entry.id}</span>
         <span className="spacer" />
-        <ViewToggle view={view} hasAsis={!!asis} hasTobe={!!tobe} onChange={switchView} />
+        {asis && tobe && <ViewToggle view={view} onChange={switchView} />}
         {view === "compare" && (
           <button
             className={linked ? "toggle active" : "toggle"}
@@ -115,9 +117,22 @@ export function ProcessScreen() {
           </button>
         )}
         {!tobe && asis && (
-          <button onClick={() => createTobe(current.entry).catch((e) => notify({ level: "error", text: String(e) }))}>
-            Create To-Be from As-Is
+          <button onClick={() => createTobe(current.entry).catch(report)} title="Copy this flow to plan changes">
+            Create To-Be
           </button>
+        )}
+        {tobe && (
+          <>
+            <button
+              onClick={() => adoptTobe().catch(report)}
+              title={`Replace ${baseName(current.entry.paths.asis)} with the To-Be`}
+            >
+              Adopt To-Be
+            </button>
+            <button onClick={() => discardTobe().catch(report)} title="Delete the To-Be">
+              Discard To-Be
+            </button>
+          </>
         )}
         <button onClick={() => undo()} disabled={!canUndo} title="Undo (Ctrl/Cmd+Z)">
           Undo
@@ -137,11 +152,12 @@ export function ProcessScreen() {
             const other = current.sides[side === "asis" ? "tobe" : "asis"];
             return (
               // Keyed by view: panes are recreated on a switch and start from sync.viewport.
-              <section key={`${view}-${side}`} className="pane" aria-label={SIDE_NAMES[side]}>
-                <PaneHeader side={side} state={state} />
+              <section key={`${view}-${side}`} className="pane" aria-label={sideName(side)}>
+                <PaneHeader name={sideName(side)} state={state} />
                 <div className="pane-body">
                   <PaneBody
                     side={side}
+                    name={sideName(side)}
                     state={state}
                     layout={layout}
                     diff={view === "compare" ? diff : null}
@@ -166,21 +182,11 @@ export function ProcessScreen() {
   );
 }
 
-function ViewToggle({
-  view,
-  hasAsis,
-  hasTobe,
-  onChange,
-}: {
-  view: ViewMode;
-  hasAsis: boolean;
-  hasTobe: boolean;
-  onChange: (view: ViewMode) => void;
-}) {
-  const options: { value: ViewMode; label: string; enabled: boolean }[] = [
-    { value: "compare", label: "Compare", enabled: hasAsis && hasTobe },
-    { value: "asis", label: "As-Is", enabled: hasAsis },
-    { value: "tobe", label: "To-Be", enabled: hasTobe },
+function ViewToggle({ view, onChange }: { view: ViewMode; onChange: (view: ViewMode) => void }) {
+  const options: { value: ViewMode; label: string }[] = [
+    { value: "compare", label: "Compare" },
+    { value: "asis", label: "As-Is" },
+    { value: "tobe", label: "To-Be" },
   ];
   return (
     <div className="segmented" role="group" aria-label="View">
@@ -188,7 +194,6 @@ function ViewToggle({
         <button
           key={o.value}
           className={view === o.value ? "active" : undefined}
-          disabled={!o.enabled}
           aria-pressed={view === o.value}
           onClick={() => onChange(o.value)}
         >
@@ -199,10 +204,11 @@ function ViewToggle({
   );
 }
 
-function PaneHeader({ side, state }: { side: Side; state: SideState | undefined }) {
+function PaneHeader({ name, state }: { name: string; state: SideState | undefined }) {
   return (
     <div className="pane-header">
-      <span>{SIDE_NAMES[side]}</span>
+      <span>{name}</span>
+      {state && <span className="muted mono">{baseName(state.path)}</span>}
       {state?.dirty && <span className="dirty">● Unsaved</span>}
     </div>
   );
@@ -210,6 +216,7 @@ function PaneHeader({ side, state }: { side: Side; state: SideState | undefined 
 
 function PaneBody({
   side,
+  name,
   state,
   layout,
   diff,
@@ -217,6 +224,7 @@ function PaneBody({
   sync,
 }: {
   side: Side;
+  name: string;
   state: SideState | undefined;
   layout: Layout | null;
   diff: ReturnType<typeof diffModels> | null;
@@ -224,11 +232,11 @@ function PaneBody({
   sync: ViewportSync;
 }) {
   const { reloadSide, keepMine, requestAdd } = useStore.getState();
-  if (!state) return <div className="pane-message muted">This process has no {SIDE_NAMES[side]} flow.</div>;
+  if (!state) return <div className="pane-message muted">This process has no {name}.</div>;
   if (!state.model) {
     return (
       <div className="pane-message">
-        <strong>{SIDE_NAMES[side]} could not be read. Fix the file and it will reload automatically.</strong>
+        <strong>{name} could not be read. Fix the file and it will reload automatically.</strong>
         <ul className="issue-list">
           {state.errors.map((e, i) => (
             <li key={i} className="error">

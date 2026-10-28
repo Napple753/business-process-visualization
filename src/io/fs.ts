@@ -15,6 +15,7 @@ export interface FileSystem {
   writeText(path: string, text: string): Promise<void>;
   exists(path: string): Promise<boolean>;
   mkdir(path: string): Promise<void>;
+  remove(path: string): Promise<void>;
   /** Calls `onChange` with changed paths; returns a function that stops watching. */
   watch(path: string, onChange: (paths: string[]) => void): Promise<() => void>;
   confirm(message: string): Promise<boolean>;
