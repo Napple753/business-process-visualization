@@ -193,6 +193,17 @@ describe("layout", () => {
     expect(positionOf(layout, "l", "d")!.y).toBeGreaterThan(b.y);
   });
 
+  it("lets processes found on one side only share a slot", async () => {
+    const asis = chain(["a", "x", "c"]);
+    const tobe = chain(["a", "y", "c"]);
+    const layout = await layoutModels([asis, tobe]);
+    const x = positionOf(layout, "l", "x")!;
+    const y = positionOf(layout, "l", "y")!;
+    expect(x).toEqual(y);
+    const single = await layoutModels([asis]);
+    expect(layout.lanes[0].width).toBe(single.lanes[0].width);
+  });
+
   it("grows rows to fit tall process boxes", async () => {
     const m = chain(["a", "b", "c"]);
     const layout = await layoutModels([m], (p) => (p.id === "b" ? 120 : 0));
@@ -201,6 +212,25 @@ describe("layout", () => {
     expect(heightOf(layout, "b")).toBe(120);
     expect(y("c") - y("b")).toBeGreaterThan(y("b") - y("a"));
     expect(y("c") - (y("b") + 120)).toBe(y("b") - (y("a") + NODE_HEIGHT));
+  });
+
+  it("keeps a process shared by both sides in the same slot", async () => {
+    const branches = (extra: string): FlowModel => ({
+      version: 1,
+      lanes: [{ id: "l", name: "l" }],
+      processes: ["a", "b", extra, "d"].map((id) => proc(id)),
+      flows: [
+        { from: "a", to: "b" },
+        { from: "a", to: extra },
+        { from: "b", to: "d" },
+        { from: extra, to: "d" },
+      ],
+    });
+    const layout = await layoutModels([branches("x"), branches("y")]);
+    const single = await layoutModels([branches("x")]);
+    expect(positionOf(layout, "l", "x")).toEqual(positionOf(layout, "l", "y"));
+    expect(positionOf(layout, "l", "x")!.x).not.toBe(positionOf(layout, "l", "b")!.x);
+    expect(layout.lanes[0].width).toBe(single.lanes[0].width);
   });
 
   it("merges lane orders", () => {

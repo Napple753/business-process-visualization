@@ -73,27 +73,45 @@ export async function layoutModels(models: FlowModel[], measure?: (p: Process) =
   const layers = new Map(placed.map((p) => [p.id, rowYs.indexOf(Math.round(p.y))]));
   const orderInRow = new Map(placed.map((p) => [p.id, p.x]));
 
-  // A process may sit in different lanes on different sides; give it a slot in each.
-  const slotGroups = new Map<string, string[]>();
-  const slotKey = (lane: string, row: number) => `${lane}#${row}`;
-  for (const m of models) {
+  // Processes of each model per cell (lane and row). A process may sit in different
+  // lanes on different sides; it then has a place in each.
+  const cells = new Map<string, string[][]>();
+  const cellKey = (lane: string, row: number) => `${lane}#${row}`;
+  models.forEach((m, i) => {
     for (const p of m.processes) {
-      const key = slotKey(p.lane, layers.get(p.id) ?? 0);
-      const group = slotGroups.get(key) ?? [];
-      if (!group.includes(p.id)) group.push(p.id);
-      slotGroups.set(key, group);
+      const key = cellKey(p.lane, layers.get(p.id) ?? 0);
+      const cell = cells.get(key) ?? models.map((): string[] => []);
+      cell[i].push(p.id);
+      cells.set(key, cell);
     }
-  }
-  for (const group of slotGroups.values()) {
-    group.sort((a, b) => (orderInRow.get(a) ?? 0) - (orderInRow.get(b) ?? 0));
+  });
+
+  // Slots within a cell: a process found there in several models takes the same slot in
+  // each, in ELK's order. The other processes of each model fill the slots after them, so
+  // processes found on only one side share slots instead of pushing each other apart.
+  const byOrder = (a: string, b: string) => (orderInRow.get(a) ?? 0) - (orderInRow.get(b) ?? 0);
+  const slotOf = new Map<string, number>();
+  const slotCounts = new Map<string, number>();
+  for (const [key, cell] of cells) {
+    const counts = new Map<string, number>();
+    for (const ids of cell) for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+    const shared = [...counts].filter(([, n]) => n > 1).map(([id]) => id).sort(byOrder);
+    shared.forEach((id, i) => slotOf.set(`${key}/${id}`, i));
+    let count = shared.length;
+    for (const ids of cell) {
+      const own = ids.filter((id) => counts.get(id) === 1).sort(byOrder);
+      own.forEach((id, i) => slotOf.set(`${key}/${id}`, shared.length + i));
+      count = Math.max(count, shared.length + own.length);
+    }
+    slotCounts.set(key, count);
   }
 
   const lanes: LaneColumn[] = [];
   let x = 0;
   for (const laneId of laneOrder) {
     let slots = 1;
-    for (const [key, group] of slotGroups) {
-      if (key.startsWith(`${laneId}#`)) slots = Math.max(slots, group.length);
+    for (const [key, count] of slotCounts) {
+      if (key.startsWith(`${laneId}#`)) slots = Math.max(slots, count);
     }
     const width = LANE_PADDING * 2 + slots * NODE_WIDTH + (slots - 1) * SLOT_GAP;
     lanes.push({ id: laneId, x, width });
@@ -118,22 +136,23 @@ export async function layoutModels(models: FlowModel[], measure?: (p: Process) =
   }
 
   const positions = new Map<string, { x: number; y: number }>();
-  for (const [key, group] of slotGroups) {
+  for (const [key, cell] of cells) {
     const [laneId, row] = key.split("#");
     const lane = laneX.get(laneId);
     if (!lane) continue;
-    // Center the group inside the lane column.
-    const groupWidth = group.length * NODE_WIDTH + (group.length - 1) * SLOT_GAP;
-    const startX = lane.x + (lane.width - groupWidth) / 2;
+    // Center the cell's slots inside the lane column.
+    const count = slotCounts.get(key) ?? 1;
+    const slotsWidth = count * NODE_WIDTH + (count - 1) * SLOT_GAP;
+    const startX = lane.x + (lane.width - slotsWidth) / 2;
     const r = Number(row);
-    group.forEach((id, i) => {
+    for (const id of new Set(cell.flat())) {
       // Vertically center boxes shorter than their row.
       const h = heights.get(id) ?? NODE_HEIGHT;
       positions.set(`${laneId}/${id}`, {
-        x: startX + i * (NODE_WIDTH + SLOT_GAP),
+        x: startX + (slotOf.get(`${key}/${id}`) ?? 0) * (NODE_WIDTH + SLOT_GAP),
         y: (rowTops[r] ?? 0) + ((rowHeights[r] ?? NODE_HEIGHT) - h) / 2,
       });
-    });
+    }
   }
 
   return {
