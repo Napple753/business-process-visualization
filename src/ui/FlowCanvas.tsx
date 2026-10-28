@@ -26,8 +26,6 @@ const edgeTypes = { flow: FlowEdge };
 const DROP_DISTANCE = 32;
 const FIT_OPTIONS = { padding: 0.06, maxZoom: 1 };
 const REVEAL_MARGIN = 24;
-/** How far past the swimlanes the viewport may scroll, in flow units. */
-const EXTENT_MARGIN = 48;
 
 /** Shared between the panes of one process screen. */
 export interface ViewportSync {
@@ -90,10 +88,11 @@ export function FlowCanvas({ side, model, otherLanes, layout, diff, sync }: Prop
     const laneNames = new Map([...otherLanes, ...model.lanes].map((l) => [l.id, l.name]));
     return layout.lanes.map((col) => ({ ...col, name: laneNames.get(col.id) ?? col.id, ghost: !laneIds.has(col.id) }));
   }, [layout, model, otherLanes, laneIds]);
+  // Panning stops at the edges of the swimlanes.
   const translateExtent = useMemo(
     (): [[number, number], [number, number]] => [
-      [-EXTENT_MARGIN, -EXTENT_MARGIN],
-      [layout.width + EXTENT_MARGIN, laneHeight + EXTENT_MARGIN],
+      [0, 0],
+      [layout.width, laneHeight],
     ],
     [layout.width, laneHeight],
   );
